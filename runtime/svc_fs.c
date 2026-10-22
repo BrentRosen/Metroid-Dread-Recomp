@@ -188,7 +188,7 @@ void romfs_init(void){
   char q[1200]; snprintf(q,sizeof q,"%sexefs/main.nro",g_datadir);
   if(!plat_file_size(q)){
     char m[1600]; snprintf(m,sizeof m,"The game's romfs is missing (the data: models, textures, sound).\n\n"
-      "Extract it with hactool (--romfsdir=romfs) and copy the folder to:\n%s\n\nThe game will close when it tries to read its data.",p);
+      "Extract the RomFS of your own copy of the game (with the update applied) and copy the folder to:\n%s\n\nThe game will close when it tries to read its data.",p);
 #if defined(_WIN32)
     extern void win_fatal_box(const char*); win_fatal_box(m);
 #elif !defined(__ANDROID__)

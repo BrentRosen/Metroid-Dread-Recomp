@@ -1,82 +1,238 @@
 {
- "code_006.c": [
-  [
-   " c->x[11]=(u64)(u32)((u32)c->x[11]+(u32)1);\n c->x[23]=(u64)((u32)((u32)0+(u32)(u32)c->x[11]*(u32)(u32)c->x[10]));\n (void)((u32)(subs32(c,(u32)c->x[8],(u32)c->x[23])));\n if(c->cf) goto L_80D1228;",
-   " c->x[11]=(u64)(u32)((u32)c->x[11]+(u32)1);\n c->x[23]=(u64)((u32)((u32)0+(u32)(u32)c->x[11]*(u32)(u32)c->x[10]));\n { u32 need_=(u32)c->x[23], cap_=(u32)c->x[8]; if(cap_<need_ && cap_<0x40000000u && cap_*2u>need_) c->x[23]=(u64)(cap_*2u); }   /* SWR: grow geometrically, the game grew 10 elements at a time (quadratic copying on big loads) */\n (void)((u32)(subs32(c,(u32)c->x[8],(u32)c->x[23])));\n if(c->cf) goto L_80D1228;"
-  ],
-  [
-   " c->x[23]=(u64)((u32)((u32)0+(u32)(u32)c->x[10]*(u32)(u32)c->x[9]));\nL_80D128C:",
-   " c->x[23]=(u64)((u32)((u32)0+(u32)(u32)c->x[10]*(u32)(u32)c->x[9]));\n { u32 need_=(u32)c->x[23], cap_=(u32)c->x[8]; if(cap_<need_ && cap_<0x40000000u && cap_*2u>need_) c->x[23]=(u64)(cap_*2u); }   /* SWR: grow geometrically on append too (the deserializer only appends; the game grew 10 elements at a time) */\nL_80D128C:"
-  ],
-  [
-   " c->x[11]=(u64)(u32)((u32)c->x[11]+(u32)1);\n c->x[23]=(u64)((u32)((u32)0+(u32)(u32)c->x[11]*(u32)(u32)c->x[10]));\n (void)((u32)(subs32(c,(u32)c->x[8],(u32)c->x[23])));\n if(c->cf) goto L_80D6C38;",
-   " c->x[11]=(u64)(u32)((u32)c->x[11]+(u32)1);\n c->x[23]=(u64)((u32)((u32)0+(u32)(u32)c->x[11]*(u32)(u32)c->x[10]));\n { u32 need_=(u32)c->x[23], cap_=(u32)c->x[8]; if(cap_<need_ && cap_<0x40000000u && cap_*2u>need_) c->x[23]=(u64)(cap_*2u); }   /* SWR: grow geometrically, the game grew 10 elements at a time (quadratic copying on big loads) */\n (void)((u32)(subs32(c,(u32)c->x[8],(u32)c->x[23])));\n if(c->cf) goto L_80D6C38;"
-  ],
-  [
-   " c->x[23]=(u64)((u32)((u32)0+(u32)(u32)c->x[10]*(u32)(u32)c->x[9]));\nL_80D6C84:",
-   " c->x[23]=(u64)((u32)((u32)0+(u32)(u32)c->x[10]*(u32)(u32)c->x[9]));\n { u32 need_=(u32)c->x[23], cap_=(u32)c->x[8]; if(cap_<need_ && cap_<0x40000000u && cap_*2u>need_) c->x[23]=(u64)(cap_*2u); }   /* SWR: grow geometrically on append too (the deserializer only appends; the game grew 10 elements at a time) */\nL_80D6C84:"
-  ]
- ],
- "code_010.c": [
-  [
-   "}\nvoid F_815386C(CPU* RESTRICT c, u64 e){",
-   "}\n/* SWR disable FXAA (port of theboy181's patch \"Disable FXAA\", github.com/theboy181/switch-ptchtxt-mods, Dread v2.1.0, main+0x14E888 MOV W8,#1 -> #0):\n   0x8153888 stores the FXAA-enabled flag at [renderer object + 0xC00]. With SWR_NO_FXAA=1 in the process environment\n   (set by the launcher) it stores 0 and the game skips its FXAA pass: sharper at high internal resolutions and with DLAA. */\n__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);\nstatic int swr_no_fxaa(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_NO_FXAA\",b,sizeof b)>0 && b[0]=='1'; }\nvoid F_815386C(CPU* RESTRICT c, u64 e){"
-  ],
-  [
-   "L_8153888:\n c->x[8]=(u64)((u32)(1));\n c->x[0]=(u64)(c->x[19]);",
-   "L_8153888:\n c->x[8]=(u64)((u32)(swr_no_fxaa()? 0 : 1));   /* SWR: FXAA on unless SWR_NO_FXAA=1 */\n c->x[0]=(u64)(c->x[19]);"
-  ]
- ],
- "code_011.c": [
-  [
-   "}\nvoid F_815E420(CPU* RESTRICT c, u64 e){",
-   "}\n/* SWR 60 FPS cutscenes (port of theboy181's patch \"60fps\", github.com/theboy181/switch-ptchtxt-mods, Dread v2.1.0): with SWR_CUTSCENES_60FPS=1 in the\n   process environment (set by the launcher) the NVN present-interval setter (cinematics ask for interval 2 = 30 FPS)\n   leaves the interval alone (main+0x15943C B.EQ -> B), and F_919F320 (code_152.c) answers yes at once. The patch's\n   third edit (main+0x159280 MOV W1,#1) is already the instruction in v2.1.0. */\n__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);\nstatic int swr_cut60(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_CUTSCENES_60FPS\",b,sizeof b)>0 && b[0]=='1'; }\nvoid F_815E420(CPU* RESTRICT c, u64 e){"
-  ],
-  [
-   " (void)((u32)(subs32(c,(u32)c->x[8],(u32)c->x[0])));\n if(c->z) goto L_815E47C;\n WR32((c->x[19]),c->x[0]);",
-   " (void)((u32)(subs32(c,(u32)c->x[8],(u32)c->x[0])));\n if(c->z || swr_cut60()) goto L_815E47C;   /* SWR: 60 FPS cutscenes keep the interval */\n WR32((c->x[19]),c->x[0]);"
-  ]
- ],
- "code_014.c": [
-  [
-   "}\nvoid F_81CCD80(CPU* RESTRICT c, u64 e){",
-   "}\n/* SWR loading_60fps: when SWR_LOADING_60=1 is in the process environment (set by the launcher),\n   the loading-screen render thread (elevators, trains, area loads) sleeps 16 ms per frame instead of 30. */\n__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);\nstatic int swr_l60(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_LOADING_60\",b,sizeof b)>0 && b[0]=='1'; }   /* read every frame: cheap, and lets tests switch it mid-run */\nvoid F_81CCD80(CPU* RESTRICT c, u64 e){"
-  ],
-  [
-   " c->x[0]=(u64)(c->x[19]);\n c->x[1]=(u64)((u32)(30));\n c->x[30]=136105520; F_806B854(c,134658132); if(UNLIKELY(c->pc!=136105520)) return;",
-   " c->x[0]=(u64)(c->x[19]);\n c->x[1]=(u64)((u32)(swr_l60()? 16 : 30));   /* SWR loading_60fps: loading-screen render sleep 30 ms -> 16 ms */\n c->x[30]=136105520; F_806B854(c,134658132); if(UNLIKELY(c->pc!=136105520)) return;"
-  ]
- ],
- "code_015.c": [
-  [
-   "L_81E66CC:\n c->x[8]=(u64)(1985589248);",
-   "L_81E66CC:\n /* SWR texel-row upload: one nvnTextureWriteTexels call per row of the dirty\n    rectangle instead of one per texel. Same function pointer, texture, data\n    and return address; only when the rectangle lies strictly inside an RGBA8\n    (format 37) texture, otherwise the original per-texel loop below runs. */\n { u64 b_=1985589248; u32 lx_=RD32(b_+1600), hx_=RD32(b_+1604), ly_=RD32(b_+1608), hy_=RD32(b_+1612);\n   u64 o_=c->x[19], d_=RD64(b_+1712);\n   if(o_ && d_ && lx_<=hx_ && ly_<=hy_ && hx_<RD32(o_) && hy_<RD32(o_+4) && RD32(o_+12)==37){\n     u64 f_=RD64(RD64(164405248+768)); c->x[31]=(u64)(c->x[31]-32);\n     for(u32 y_=ly_; y_<=hy_; y_++){\n       u64 s_=c->x[31]; WR32(s_,lx_); WR32(s_+4,y_); WR32(s_+8,0); WR32(s_+12,hx_-lx_+1); WR32(s_+16,1); WR32(s_+20,1);\n       c->x[0]=(u64)(o_+24); c->x[1]=0; c->x[2]=(u64)(s_); c->x[3]=(u64)(d_+((u64)(u32)((u32)lx_+((u32)y_<<10))<<2));\n       c->x[30]=136210232; CALLDYN(f_); if(UNLIKELY(c->pc!=136210232)) return; }\n     c->x[31]=(u64)(c->x[31]+32);\n     goto L_81E675C; } }\n c->x[8]=(u64)(1985589248);"
-  ]
- ],
- "code_152.c": [
-  [
-   "}\nvoid F_919F320(CPU* RESTRICT c, u64 e){",
-   "}\n/* SWR 60 FPS cutscenes (see code_011.c F_815E420): the patch makes this check RET at once, leaving X0 (the object,\n   non-zero) as the answer */\n__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);\nstatic int swr_cut60b(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_CUTSCENES_60FPS\",b,sizeof b)>0 && b[0]=='1'; }\nvoid F_919F320(CPU* RESTRICT c, u64 e){"
-  ],
-  [
-   "L_919F320:\n c->x[31]=(u64)(c->x[31]-320);",
-   "L_919F320:\n if(swr_cut60b()){ c->pc=c->x[30]; return; }   /* SWR: RET, X0 unchanged */\n c->x[31]=(u64)(c->x[31]-320);"
-  ]
- ],
- "code_217.c": [
-  [
-   "}\nvoid F_7B47C0E0(CPU* RESTRICT c, u64 e){",
-   "}\n/* SWR native zlib: nn::util DecompressZlib's worker (this function: inflateInit2 with the work-buffer allocator,\n   inflate(Z_FINISH), inflateEnd; true iff Z_STREAM_END) runs through the PC's zlib1.dll (zlib 1.3.1), next to\n   the game, instead of the recompiled ARM zlib. Measured: 68% of the main thread's CPU during the first load\n   was this inflate. Output bytes are identical for valid streams; anything unusual falls back to the original\n   code below. SWR_NATIVE_ZLIB=0 disables it; SWR_ZLIB_VERIFY=1 runs both on every call and compares. */\n#include <stdio.h>\ntypedef struct { const unsigned char* next_in; unsigned int avail_in; unsigned long total_in; unsigned char* next_out; unsigned int avail_out;\n  unsigned long total_out; const char* msg; void* state; void* zalloc; void* zfree; void* opaque; int data_type; unsigned long adler; unsigned long reserved; } swr_zs;\n__declspec(dllimport) void* __stdcall LoadLibraryA(const char*);\n__declspec(dllimport) void* __stdcall GetProcAddress(void*, const char*);\n__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*, char*, unsigned long);\nextern void* malloc(size_t); extern void free(void*);\nstatic int (*swr_zi2)(swr_zs*, int, const char*, int); static int (*swr_zinf)(swr_zs*, int); static int (*swr_zend)(swr_zs*); static const char* (*swr_zver)(void);\nstatic int swr_zmode = -1;   /* 0 off, 1 native, 2 verify */\nstatic volatile int swr_zbypass;   /* verify mode only (a plain static: __thread would make the DLL need libwinpthread-1.dll) */\nstatic unsigned long long swr_zcalls, swr_zbad, swr_zbytes;\nstatic int swr_zlib_init(void){ char b[8];\n  if(GetEnvironmentVariableA(\"SWR_NATIVE_ZLIB\", b, sizeof b) > 0 && b[0] == '0') return 0;\n  void* h = LoadLibraryA(\"zlib1.dll\"); if(!h){ fprintf(stderr, \"zlib: zlib1.dll not found next to the game, using the recompiled inflate\\n\"); return 0; }\n  *(void**)&swr_zi2 = GetProcAddress(h, \"inflateInit2_\"); *(void**)&swr_zinf = GetProcAddress(h, \"inflate\");\n  *(void**)&swr_zend = GetProcAddress(h, \"inflateEnd\"); *(void**)&swr_zver = GetProcAddress(h, \"zlibVersion\");\n  if(!swr_zi2 || !swr_zinf || !swr_zend || !swr_zver) return 0;\n  int verify = GetEnvironmentVariableA(\"SWR_ZLIB_VERIFY\", b, sizeof b) > 0 && b[0] == '1';\n  fprintf(stderr, \"zlib: native inflate active (zlib %s)%s\\n\", swr_zver(), verify ? \", verifying every call against the recompiled one\" : \"\"); fflush(stderr);\n  return verify ? 2 : 1; }\n/* 1 = handled (result in *res, bytes written in *n), 0 = let the original code do it */\nstatic int swr_zrun(CPU* c, unsigned char* out, int* res, unsigned* n){ u8* const M = c->mem; swr_zs s; memset(&s, 0, sizeof s);\n  s.next_in = M + c->x[2]; s.avail_in = (unsigned)c->x[3]; s.next_out = out; s.avail_out = (unsigned)c->x[1];\n  if(swr_zi2(&s, (int)(unsigned)c->x[6], swr_zver(), (int)sizeof s) != 0) return 0;\n  int r = swr_zinf(&s, 4); swr_zend(&s); *n = (unsigned)s.total_out;\n  if(r == 1){ *res = 1; return 1; }\n  if(r <= -2 || r == 2){ *res = 0; return 1; }   /* the original returns false for these */\n  return 0; }                                      /* Z_OK / Z_STREAM_ERROR: the original aborts; keep that path */\nstatic int swr_zlib(CPU* c){\n  if(swr_zmode < 0) swr_zmode = swr_zlib_init();\n  if(!swr_zmode || swr_zbypass) return 0;\n  u8* const M = c->mem; int res = 0; unsigned n = 0;\n  if(swr_zmode == 1){ if(!swr_zrun(c, M + c->x[0], &res, &n)) return 0; c->x[0] = (u64)res; return 1; }\n  unsigned cap = (unsigned)c->x[1]; unsigned char* tmp = malloc(cap ? cap : 1); if(!tmp) return 0;\n  u64 dst = c->x[0]; int nok = swr_zrun(c, tmp, &res, &n);\n  swr_zbypass = 1; F_7B47C0E0(c, 2068300000); swr_zbypass = 0;   /* the original, into the real buffer */\n  int g = (int)(c->x[0] & 1); swr_zcalls++; swr_zbytes += n;\n  int bad = !nok || res != g || (res && memcmp(M + dst, tmp, n) != 0);\n  if(bad){ swr_zbad++; if(swr_zbad <= 20) fprintf(stderr, \"zlib verify: MISMATCH on call %llu (native handled %d result %d, original %d, %u bytes)\\n\", swr_zcalls, nok, res, g, n); }\n  if(swr_zcalls % 500 == 0 || bad) { fprintf(stderr, \"zlib verify: %llu calls, %llu MB, %llu mismatches\\n\", swr_zcalls, swr_zbytes >> 20, swr_zbad); fflush(stderr); }\n  free(tmp); return 1; }\nvoid F_7B47C0E0(CPU* RESTRICT c, u64 e){"
-  ],
-  [
-   " if(UNLIKELY(e!=2068300000)){ c->pc=e; goto D_; }\nL_7B47C0E0:",
-   " if(UNLIKELY(e!=2068300000)){ c->pc=e; goto D_; }\n if(swr_zlib(c)){ c->pc=c->x[30]; return; }   /* SWR native zlib */\nL_7B47C0E0:"
-  ]
- ],
- "code_230.c": [
-  [
-   "}\nvoid F_7B600D78(CPU* RESTRICT c, u64 e){\n u8* const M=c->mem;\n if(UNLIKELY(e!=2069892472)){ c->pc=e; goto D_; }",
-   "}\nSWR_FN(F_7B600D78)\n if(UNLIKELY(e!=2069892472)){ c->pc=e; goto D_; }"
-  ]
- ]
+ "format": 2,
+ "files": {
+  "code_006.c": {
+   "pristine": "8e58e3ecb5aa0d2005a7a918f1d0eef25ced955f820d2d837abf8f7cc7b3ab60",
+   "result": "e6233bf1383307d7ef2ae02c95cb6c725666fb1d838f9a9e04d252b6f2978177",
+   "hunks": [
+    [
+     24476,
+     24476,
+     [
+      " { u32 need_=(u32)c->x[23], cap_=(u32)c->x[8]; if(cap_<need_ && cap_<0x40000000u && cap_*2u>need_) c->x[23]=(u64)(cap_*2u); }   /* SWR: grow geometrically, the game grew 10 elements at a time (quadratic copying on big loads) */"
+     ]
+    ],
+    [
+     24546,
+     24546,
+     [
+      " { u32 need_=(u32)c->x[23], cap_=(u32)c->x[8]; if(cap_<need_ && cap_<0x40000000u && cap_*2u>need_) c->x[23]=(u64)(cap_*2u); }   /* SWR: grow geometrically on append too (the deserializer only appends; the game grew 10 elements at a time) */"
+     ]
+    ],
+    [
+     33333,
+     33333,
+     [
+      " { u32 need_=(u32)c->x[23], cap_=(u32)c->x[8]; if(cap_<need_ && cap_<0x40000000u && cap_*2u>need_) c->x[23]=(u64)(cap_*2u); }   /* SWR: grow geometrically, the game grew 10 elements at a time (quadratic copying on big loads) */"
+     ]
+    ],
+    [
+     33383,
+     33383,
+     [
+      " { u32 need_=(u32)c->x[23], cap_=(u32)c->x[8]; if(cap_<need_ && cap_<0x40000000u && cap_*2u>need_) c->x[23]=(u64)(cap_*2u); }   /* SWR: grow geometrically on append too (the deserializer only appends; the game grew 10 elements at a time) */"
+     ]
+    ]
+   ]
+  },
+  "code_010.c": {
+   "pristine": "e5f645d6d347e65ba3576bd41a0b99a7a16b4f32737d73bd089ab3f6cce3112c",
+   "result": "6049bf7c2238625aee2dc1541b4f2789b8fce472aa4645030c1ec2eb21b12363",
+   "hunks": [
+    [
+     41642,
+     41642,
+     [
+      "/* SWR disable FXAA (port of theboy181's patch \"Disable FXAA\", github.com/theboy181/switch-ptchtxt-mods, Dread v2.1.0, main+0x14E888 MOV W8,#1 -> #0):",
+      "   0x8153888 stores the FXAA-enabled flag at [renderer object + 0xC00]. With SWR_NO_FXAA=1 in the process environment",
+      "   (set by the launcher) it stores 0 and the game skips its FXAA pass: sharper at high internal resolutions and with DLAA. */",
+      "__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);",
+      "static int swr_no_fxaa(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_NO_FXAA\",b,sizeof b)>0 && b[0]=='1'; }"
+     ]
+    ],
+    [
+     41654,
+     41655,
+     [
+      " c->x[8]=(u64)((u32)(swr_no_fxaa()? 0 : 1));   /* SWR: FXAA on unless SWR_NO_FXAA=1 */"
+     ]
+    ]
+   ]
+  },
+  "code_011.c": {
+   "pristine": "289e28642249d66884704e0e3d2710519b2af54578ecbbfc5a4447605dd8cf6a",
+   "result": "f4540122c0ee431a72cab5395e038923c0ab16e548fe7f69fcb81ce263fb328d",
+   "hunks": [
+    [
+     9581,
+     9581,
+     [
+      "/* SWR 60 FPS cutscenes (port of theboy181's patch \"60fps\", github.com/theboy181/switch-ptchtxt-mods, Dread v2.1.0): with SWR_CUTSCENES_60FPS=1 in the",
+      "   process environment (set by the launcher) the NVN present-interval setter (cinematics ask for interval 2 = 30 FPS)",
+      "   leaves the interval alone (main+0x15943C B.EQ -> B), and F_919F320 (code_152.c) answers yes at once. The patch's",
+      "   third edit (main+0x159280 MOV W1,#1) is already the instruction in v2.1.0. */",
+      "__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);",
+      "static int swr_cut60(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_CUTSCENES_60FPS\",b,sizeof b)>0 && b[0]=='1'; }"
+     ]
+    ],
+    [
+     9592,
+     9593,
+     [
+      " if(c->z || swr_cut60()) goto L_815E47C;   /* SWR: 60 FPS cutscenes keep the interval */"
+     ]
+    ]
+   ]
+  },
+  "code_014.c": {
+   "pristine": "c2460052f58de568e42e0965163d19bd4dd6652aabd1d4eac7c291628ee51842",
+   "result": "093b1d04033e07ce67113d9d9b19e5f9529edb06c152c85c747736c44161f3c5",
+   "hunks": [
+    [
+     39763,
+     39763,
+     [
+      "/* SWR loading_60fps: when SWR_LOADING_60=1 is in the process environment (set by the launcher),",
+      "   the loading-screen render thread (elevators, trains, area loads) sleeps 16 ms per frame instead of 30. */",
+      "__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);",
+      "static int swr_l60(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_LOADING_60\",b,sizeof b)>0 && b[0]=='1'; }   /* read every frame: cheap, and lets tests switch it mid-run */"
+     ]
+    ],
+    [
+     39818,
+     39819,
+     [
+      " c->x[1]=(u64)((u32)(swr_l60()? 16 : 30));   /* SWR loading_60fps: loading-screen render sleep 30 ms -> 16 ms */"
+     ]
+    ]
+   ]
+  },
+  "code_015.c": {
+   "pristine": "a70bcd46deade7f366d1bef0f5864fd9f7933c3b5ddf969dba0f202860294c50",
+   "result": "84737999361992910de2718b63becded00e33382e8d4afb4c711daddebcd4a45",
+   "hunks": [
+    [
+     34381,
+     34381,
+     [
+      " /* SWR texel-row upload: one nvnTextureWriteTexels call per row of the dirty",
+      "    rectangle instead of one per texel. Same function pointer, texture, data",
+      "    and return address; only when the rectangle lies strictly inside an RGBA8",
+      "    (format 37) texture, otherwise the original per-texel loop below runs. */",
+      " { u64 b_=1985589248; u32 lx_=RD32(b_+1600), hx_=RD32(b_+1604), ly_=RD32(b_+1608), hy_=RD32(b_+1612);",
+      "   u64 o_=c->x[19], d_=RD64(b_+1712);",
+      "   if(o_ && d_ && lx_<=hx_ && ly_<=hy_ && hx_<RD32(o_) && hy_<RD32(o_+4) && RD32(o_+12)==37){",
+      "     u64 f_=RD64(RD64(164405248+768)); c->x[31]=(u64)(c->x[31]-32);",
+      "     for(u32 y_=ly_; y_<=hy_; y_++){",
+      "       u64 s_=c->x[31]; WR32(s_,lx_); WR32(s_+4,y_); WR32(s_+8,0); WR32(s_+12,hx_-lx_+1); WR32(s_+16,1); WR32(s_+20,1);",
+      "       c->x[0]=(u64)(o_+24); c->x[1]=0; c->x[2]=(u64)(s_); c->x[3]=(u64)(d_+((u64)(u32)((u32)lx_+((u32)y_<<10))<<2));",
+      "       c->x[30]=136210232; CALLDYN(f_); if(UNLIKELY(c->pc!=136210232)) return; }",
+      "     c->x[31]=(u64)(c->x[31]+32);",
+      "     goto L_81E675C; } }"
+     ]
+    ]
+   ]
+  },
+  "code_152.c": {
+   "pristine": "6c5f1074fc4e6dd25c25fc175ce5a1526d6898c22b988511f127184426c5abab",
+   "result": "e11a1f0ba0d348e6bc1a6b82eac958790f84f7f81801bc716aff8b9f6ddaedcb",
+   "hunks": [
+    [
+     8660,
+     8660,
+     [
+      "/* SWR 60 FPS cutscenes (see code_011.c F_815E420): the patch makes this check RET at once, leaving X0 (the object,",
+      "   non-zero) as the answer */",
+      "__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);",
+      "static int swr_cut60b(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_CUTSCENES_60FPS\",b,sizeof b)>0 && b[0]=='1'; }"
+     ]
+    ],
+    [
+     8664,
+     8664,
+     [
+      " if(swr_cut60b()){ c->pc=c->x[30]; return; }   /* SWR: RET, X0 unchanged */"
+     ]
+    ]
+   ]
+  },
+  "code_217.c": {
+   "pristine": "b7f14f2fd6442b334665e1044ff5ce4fc3fce45a6b05e7d13e41e034a01f285f",
+   "result": "2afb34829d6461b8eabdf04134b107d1079bdcdc05948975bde4b60377f14ac0",
+   "hunks": [
+    [
+     37980,
+     37980,
+     [
+      "/* SWR native zlib: nn::util DecompressZlib's worker (this function: inflateInit2 with the work-buffer allocator,",
+      "   inflate(Z_FINISH), inflateEnd; true iff Z_STREAM_END) runs through the PC's zlib1.dll (zlib 1.3.1), next to",
+      "   the game, instead of the recompiled ARM zlib. Measured: 68% of the main thread's CPU during the first load",
+      "   was this inflate. Output bytes are identical for valid streams; anything unusual falls back to the original",
+      "   code below. SWR_NATIVE_ZLIB=0 disables it; SWR_ZLIB_VERIFY=1 runs both on every call and compares. */",
+      "#include <stdio.h>",
+      "typedef struct { const unsigned char* next_in; unsigned int avail_in; unsigned long total_in; unsigned char* next_out; unsigned int avail_out;",
+      "  unsigned long total_out; const char* msg; void* state; void* zalloc; void* zfree; void* opaque; int data_type; unsigned long adler; unsigned long reserved; } swr_zs;",
+      "__declspec(dllimport) void* __stdcall LoadLibraryA(const char*);",
+      "__declspec(dllimport) void* __stdcall GetProcAddress(void*, const char*);",
+      "__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*, char*, unsigned long);",
+      "extern void* malloc(size_t); extern void free(void*);",
+      "static int (*swr_zi2)(swr_zs*, int, const char*, int); static int (*swr_zinf)(swr_zs*, int); static int (*swr_zend)(swr_zs*); static const char* (*swr_zver)(void);",
+      "static int swr_zmode = -1;   /* 0 off, 1 native, 2 verify */",
+      "static volatile int swr_zbypass;   /* verify mode only (a plain static: __thread would make the DLL need libwinpthread-1.dll) */",
+      "static unsigned long long swr_zcalls, swr_zbad, swr_zbytes;",
+      "static int swr_zlib_init(void){ char b[8];",
+      "  if(GetEnvironmentVariableA(\"SWR_NATIVE_ZLIB\", b, sizeof b) > 0 && b[0] == '0') return 0;",
+      "  void* h = LoadLibraryA(\"zlib1.dll\"); if(!h){ fprintf(stderr, \"zlib: zlib1.dll not found next to the game, using the recompiled inflate\\n\"); return 0; }",
+      "  *(void**)&swr_zi2 = GetProcAddress(h, \"inflateInit2_\"); *(void**)&swr_zinf = GetProcAddress(h, \"inflate\");",
+      "  *(void**)&swr_zend = GetProcAddress(h, \"inflateEnd\"); *(void**)&swr_zver = GetProcAddress(h, \"zlibVersion\");",
+      "  if(!swr_zi2 || !swr_zinf || !swr_zend || !swr_zver) return 0;",
+      "  int verify = GetEnvironmentVariableA(\"SWR_ZLIB_VERIFY\", b, sizeof b) > 0 && b[0] == '1';",
+      "  fprintf(stderr, \"zlib: native inflate active (zlib %s)%s\\n\", swr_zver(), verify ? \", verifying every call against the recompiled one\" : \"\"); fflush(stderr);",
+      "  return verify ? 2 : 1; }",
+      "/* 1 = handled (result in *res, bytes written in *n), 0 = let the original code do it */",
+      "static int swr_zrun(CPU* c, unsigned char* out, int* res, unsigned* n){ u8* const M = c->mem; swr_zs s; memset(&s, 0, sizeof s);",
+      "  s.next_in = M + c->x[2]; s.avail_in = (unsigned)c->x[3]; s.next_out = out; s.avail_out = (unsigned)c->x[1];",
+      "  if(swr_zi2(&s, (int)(unsigned)c->x[6], swr_zver(), (int)sizeof s) != 0) return 0;",
+      "  int r = swr_zinf(&s, 4); swr_zend(&s); *n = (unsigned)s.total_out;",
+      "  if(r == 1){ *res = 1; return 1; }",
+      "  if(r <= -2 || r == 2){ *res = 0; return 1; }   /* the original returns false for these */",
+      "  return 0; }                                      /* Z_OK / Z_STREAM_ERROR: the original aborts; keep that path */",
+      "static int swr_zlib(CPU* c){",
+      "  if(swr_zmode < 0) swr_zmode = swr_zlib_init();",
+      "  if(!swr_zmode || swr_zbypass) return 0;",
+      "  u8* const M = c->mem; int res = 0; unsigned n = 0;",
+      "  if(swr_zmode == 1){ if(!swr_zrun(c, M + c->x[0], &res, &n)) return 0; c->x[0] = (u64)res; return 1; }",
+      "  unsigned cap = (unsigned)c->x[1]; unsigned char* tmp = malloc(cap ? cap : 1); if(!tmp) return 0;",
+      "  u64 dst = c->x[0]; int nok = swr_zrun(c, tmp, &res, &n);",
+      "  swr_zbypass = 1; F_7B47C0E0(c, 2068300000); swr_zbypass = 0;   /* the original, into the real buffer */",
+      "  int g = (int)(c->x[0] & 1); swr_zcalls++; swr_zbytes += n;",
+      "  int bad = !nok || res != g || (res && memcmp(M + dst, tmp, n) != 0);",
+      "  if(bad){ swr_zbad++; if(swr_zbad <= 20) fprintf(stderr, \"zlib verify: MISMATCH on call %llu (native handled %d result %d, original %d, %u bytes)\\n\", swr_zcalls, nok, res, g, n); }",
+      "  if(swr_zcalls % 500 == 0 || bad) { fprintf(stderr, \"zlib verify: %llu calls, %llu MB, %llu mismatches\\n\", swr_zcalls, swr_zbytes >> 20, swr_zbad); fflush(stderr); }",
+      "  free(tmp); return 1; }"
+     ]
+    ],
+    [
+     37983,
+     37983,
+     [
+      " if(swr_zlib(c)){ c->pc=c->x[30]; return; }   /* SWR native zlib */"
+     ]
+    ]
+   ]
+  },
+  "code_230.c": {
+   "pristine": "009772afa0fdc365195c816f610461610eb49b46776601b35278a0f2eb56eea8",
+   "result": "6c4917799b1cc731432e88acc7a8f35b5b667e826c413015d1633f06cd7e8480",
+   "hunks": [
+    [
+     33540,
+     33542,
+     [
+      "SWR_FN(F_7B600D78)"
+     ]
+    ]
+   ]
+  }
+ }
 }

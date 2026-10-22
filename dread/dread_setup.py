@@ -93,7 +93,7 @@ def pick_exefs(base, update):
     what, bid = seen[0]
     raise Fail('The %s has Metroid Dread, but not version %s (its main has build ID %s). '
                'Most likely this is the base game: also choose the extracted 2.1.0 update as "Update folder", or extract the game '
-               'together with the update (hactool --basenca=base.nca ... update.nca), which gives the 2.1.0 ExeFS.'
+               'with the update applied, which gives the 2.1.0 ExeFS.'
                % (what, VERSION, (bid or 'unknown')[:16] + '...'))
 
 
@@ -141,7 +141,7 @@ def assemble_romfs(base_romfs, upd_romfs, dst, pct0, pct1):
             hint = ' An update RomFS on its own only has the changed files: also choose the base game folder.'
         elif base_romfs and not upd_romfs:
             hint = (' Files only the 2.1.0 update adds are missing: choose the extracted update as "Update folder", or extract a RomFS with the '
-                    'update already merged (hactool --basenca, or an emulator\'s "Extract RomFS" with the update installed).')
+                    'update applied (an emulator\'s "Extract RomFS" with the update installed does this).')
         raise Fail('The RomFS is incomplete: %d of %d files of version %s are missing (for example %s).%s'
                    % (len(missing), len(rows), VERSION, ', '.join(missing[:3]), hint))
     if upd_romfs:
@@ -188,7 +188,7 @@ def assemble_romfs(base_romfs, upd_romfs, dst, pct0, pct1):
     if bad:
         raise Fail('%d RomFS files are not the %s versions (for example %s). The RomFS may be modified, damaged, from another version, '
                    'or an update RomFS extracted without its base game (an unmerged patch). Extract it again with the update merged '
-                   '(hactool --basenca, or an emulator\'s "Extract RomFS" with the update installed).' % (len(bad), VERSION, ', '.join(bad[:3])))
+                   '(an emulator\'s "Extract RomFS" with the update installed does this).' % (len(bad), VERSION, ', '.join(bad[:3])))
     with open(marker, 'w') as f:
         f.write(mhash)
     log('RomFS: all %d files match version %s (%.0f s)' % (len(rows), VERSION, time.time() - t0))
@@ -196,28 +196,36 @@ def assemble_romfs(base_romfs, upd_romfs, dst, pct0, pct1):
 
 # ------------------------------------------------------------------ code
 def apply_patches(build):
+    """dread_v210_patches.json, format 2 (dread/make_patches.py): per generated file the SHA-256 of the codegen output it
+    expects and of the result, and hunks [first_line, end_line, lines] replacing those lines. No generated code is stored:
+    the codegen output is deterministic for the verified 2.1.0 ExeFS, and the hashes check it before and after"""
     with open(PATCHES, 'r', encoding='utf-8') as f:
         patches = json.load(f)
+    if patches.get('format') != 2:
+        raise Fail('dread_v210_patches.json is not in the expected format (2).')
     n = 0
-    for name, pairs in patches.items():
+    for name, spec in patches['files'].items():
         path = os.path.join(build, name)
         raw = open(path, 'rb').read().decode('latin-1')
         crlf = '\r\n' in raw
         text = raw.replace('\r\n', '\n')
-        for old, new in pairs:
-            if text.count(old) == 1:
-                text = text.replace(old, new); n += 1
-            elif text.count(new) == 1 and old not in text:
-                pass   # already applied
-            else:
-                raise Fail('The generated code does not match the verified %s build (%s). Delete the folder "%s" and run setup again.'
-                           % (VERSION, name, build))
+        have = hashlib.sha256(text.encode('latin-1')).hexdigest()
+        if have == spec['result']:
+            continue   # already applied (a resumed setup)
+        if have != spec['pristine']:
+            raise Fail('The generated code does not match the verified %s build (%s). Delete the folder "%s" and run setup again.'
+                       % (VERSION, name, build))
+        lines = text.split('\n')
+        for first, end, add in sorted(spec['hunks'], key=lambda h: h[0], reverse=True):
+            lines[first:end] = add
+            n += 1
+        text = '\n'.join(lines)
+        if hashlib.sha256(text.encode('latin-1')).hexdigest() != spec['result']:
+            raise Fail('Patching %s did not give the verified %s result.' % (name, VERSION))
         if crlf:
             text = text.replace('\n', '\r\n')
-        out = text.encode('latin-1')
-        if out != open(path, 'rb').read():
-            with open(path, 'wb') as f:
-                f.write(out)
+        with open(path, 'wb') as f:
+            f.write(text.encode('latin-1'))
     log('Applied %d verified Metroid Dread %s patches (memcpy, texture rows, zlib, 60 FPS scenes, vector growth)' % (n, VERSION))
 
 

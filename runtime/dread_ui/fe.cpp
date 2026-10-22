@@ -144,7 +144,7 @@ static void setup_screen(ImVec2 a, ImVec2 b) {
         section("YOUR GAME FILES");
         std::string bl = g_base.empty() ? "CHOOSE" : g_base; if (bl.size() > 48) bl = "..." + bl.substr(bl.size() - 45);
         if (row_button("##base", "Game folder (with exefs and romfs)", bl.c_str())) { std::string p = pick_folder(g_hwnd, "Choose your extracted Metroid Dread folder"); if (!p.empty()) { g_base = p; set("setup_base", p); } }
-        help_text("Extract the game with your own keys, for example: hactool --basenca=base.nca --exefsdir=exefs --romfsdir=romfs update.nca. "
+        help_text("Dump the game and its 2.1.0 update from your own Switch and extract them with the update applied (or use an emulator's Extract RomFS / Extract ExeFS with the update installed). "
                   "That gives the 2.1.0 ExeFS and an already merged RomFS. You can also pick a folder that has exefs and romfs directly.");
         std::string ul = g_update.empty() ? "OPTIONAL" : g_update; if (ul.size() > 48) ul = "..." + ul.substr(ul.size() - 45);
         if (row_button("##upd", "Update folder (if extracted separately)", ul.c_str())) { std::string p = pick_folder(g_hwnd, "Choose the extracted 2.1.0 update folder"); g_update = p; set("setup_update", p); }

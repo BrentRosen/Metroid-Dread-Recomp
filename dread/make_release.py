@@ -75,9 +75,9 @@ README = """METROID DREAD - recompiled for PC
 This is not the game. It turns YOUR OWN copy of Metroid Dread (version 2.1.0) into a native Windows game:
 setup compiles it on your PC. No Nintendo files, keys or firmware are included.
 
-1. Extract your game with your own keys, with the 2.1.0 update merged, for example:
-       hactool -k prod.keys --basenca=base.nca --exefsdir=exefs --romfsdir=romfs update.nca
-   (or use an emulator's "Extract RomFS" / "Extract ExeFS" with the update installed).
+1. Dump Metroid Dread and its 2.1.0 update from your own Switch and extract them, with the update applied, into a
+   folder with "exefs" and "romfs" inside (an emulator's "Extract RomFS" / "Extract ExeFS" with the update installed
+   gives this too). This program does not dump or decrypt anything itself.
 2. Start "Metroid Dread.exe". The first time it asks for that folder (and, if you extracted the update separately,
    the update folder), checks every file against the 2.1.0 file list and compiles the game with the bundled GCC.
    That takes a few minutes and about 7 GB of space next to the EXE (less when your game files are on the same drive).
@@ -146,6 +146,35 @@ SRC_IGNORE = ['*.o', '*.a', '*.obj', '*.exe', '*.dll', '__pycache__', 'obj', 'ob
               'lsfg.c', 'lsfg_spvc.cpp', 'spvc']   # no frame generation (it loads Lossless Scaling's DLL) in the public source
 
 
+def snx_keep():
+    """the renderer files the build reads (runtime/snxvk/src_new): the sources build_snxvk2.py compiles, everything they
+    #include (C and GLSL), the generator inputs and tools, our shader sources. Upstream ScarletNX's other parts (its game
+    -dump extractor and decryption, GUI, recompiler) are not built here and stay out of the public source"""
+    import re
+    s2 = os.path.join(ROOT, 'runtime', 'snxvk', 'src_new'); nx = os.path.join(s2, 'nx')
+    b = open(os.path.join(ROOT, 'work-profiler', 'build_snxvk2.py'), encoding='utf-8').read()
+    src = ''.join(re.findall(r"'([^']*)'", re.search(r"SRC = \((.*?)\)\.split\(\)", b, re.S).group(1))).split()
+    src += ['gpu/vk/dlss.c', 'gpu/vk/dlss_stub.c', 'gpu/vk/vma.cpp', 'gpu/shader/maxwell_opcodes.def', 'runtime/settings.txt']
+    src += re.findall(r"\('([^']+\.comp)'", b)
+    todo = [os.path.join(nx, f) for f in src]
+    for d in (os.path.join(nx, 'gpu', 'vk', 'shaders'), os.path.join(s2, 'tools')):
+        for dp, dn, fn in os.walk(d): todo += [os.path.join(dp, n) for n in fn]
+    keep = set()
+    while todo:
+        f = os.path.normpath(todo.pop())
+        if f in keep or not os.path.isfile(f): continue
+        keep.add(f)
+        if f.endswith(('.c', '.h', '.cpp', '.comp', '.glsl', '.vert', '.frag', '.inc')):
+            for inc in re.findall(r'#include "([^"]+)"', open(f, encoding='utf-8', errors='replace').read()):
+                for base in (s2, nx, os.path.dirname(f)):
+                    q = os.path.normpath(os.path.join(base, inc))
+                    if os.path.isfile(q): todo.append(q); break
+    return keep
+
+
+_SNX_KEEP = None
+
+
 def src_ignore(d, names):
     out = set(shutil.ignore_patterns(*SRC_IGNORE)(d, names))
     n = os.path.normpath(d)
@@ -153,10 +182,19 @@ def src_ignore(d, names):
     if n == os.path.normpath(os.path.join(ROOT, 'runtime', 'snxvk')): out |= {'src'} & set(names)   # the old renderer: src_new is it
     # the renderer's dependencies: only what the build reads, and their licences. Their docs and tools are not needed,
     # and their deep paths passed Windows' 260-character limit in a clone (MEASURED 2026-10-22)
+    s2 = os.path.normpath(os.path.join(ROOT, 'runtime', 'snxvk', 'src_new'))
+    if n == s2 or n.startswith(s2 + os.sep):   # only what the build reads (snx_keep)
+        global _SNX_KEEP
+        if _SNX_KEEP is None: _SNX_KEEP = snx_keep()
+        for x in names:
+            q = os.path.join(n, x)
+            if os.path.isdir(q):
+                if not any(k.startswith(q + os.sep) for k in _SNX_KEEP): out.add(x)
+            elif q not in _SNX_KEEP: out.add(x)
     if os.path.dirname(n) == os.path.normpath(os.path.join(ROOT, 'runtime', 'snxvk', 'deps')):
         keep = {'include', 'LICENSE.md', 'LICENSE.txt', 'LICENSES', 'README.md', 'volk.c', 'volk.h'}
         out |= set(names) - keep
-    # ScarletNX's game-file driver (container extraction and hactool's decryption): none of it is in our build, only
+    # ScarletNX's game-file driver (container extraction and decryption): none of it is in our build, only
     # its headers are included on the way to fs.h, so the public source carries the headers and not the code
     drv = os.path.normpath(os.path.join(ROOT, 'runtime', 'snxvk', 'src_new', 'nx', 'runtime', 'driver'))
     if n == drv or n.startswith(drv + os.sep):

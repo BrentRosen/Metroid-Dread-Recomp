@@ -3,7 +3,11 @@
 #include "nx/gpu/shipped_pass.h"
 #include "nx/gpu/shader/shader.h"
 #include "nx/gpu/shader/shipped.h"
-#include "nx/hle/filesystem/fs.h"
+/* SWR: the two RomFS readers this walk uses (nx/hle/filesystem/fs.h declares them; including it pulls in the game-dump
+   driver, which this build has no use for). runtime/snxvk_glue.c provides them */
+typedef int (*RomfsEach)(void* ctx, const char* name, u64 off, u64 size);
+int romfs_files(RomfsEach each, void* ctx);
+int romfs_peek(u64 off, void* dst, u64 size);
 #include "nx/runtime/loader.h"
 #include <stdarg.h>
 #include <stdio.h>

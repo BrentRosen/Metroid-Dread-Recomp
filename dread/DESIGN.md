@@ -72,8 +72,8 @@ No Nintendo files are shipped.
     - or a base folder plus an update folder. The update's RomFS files are layered over the base, then
       the result must match the manifest.
   - An update RomFS that cannot be layered (an unmerged BKTR patch) fails the manifest check. The error
-    explains how to extract a merged RomFS (hactool `--basenca`, or an emulator's "Extract RomFS" with
-    the update installed).
+    explains how to get a merged RomFS (extract with the update applied, for example an emulator's
+    "Extract RomFS" with the update installed).
 - **Resume/recovery:** every stage writes a marker. A failed or interrupted compile keeps the generated
   C and the objects that finished; "Retry" continues from there. The full log is `setup.log`, shown
   live.

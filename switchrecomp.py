@@ -9,7 +9,7 @@ The game code is translated to C ahead of time (plus a fallback interpreter buil
 instruction templates). The runtime provides HLE kernel/services and a GL renderer for the GPU.
 
 Usage:
-  python switchrecomp.py GAME_FOLDER                   (with exefs/ and romfs/ from hactool)
+  python switchrecomp.py GAME_FOLDER                   (with exefs/ and romfs/ extracted from your own copy)
   python switchrecomp.py game.nro                      (homebrew)
   python switchrecomp.py FOLDER -o Game --cc gcc -O 2 --jobs 8
 
