@@ -636,6 +636,9 @@ static int mv_pipeline(VkFormat depth) {
 static u32 mv_pass(VkCommandBuffer cb, Surf* z, u32 w, u32 h) {
     u32 c = g_mv.cur, p = c ^ 1, drawn = 0;
     if (!g_mv.on || !g_mv.nrec[c] || !mv_pipeline(z->f.vk)) return 0;
+    { static int said; if (said < 3) { said++;
+        LOG("dlss: motion-vector pass %ux%u, depth %llx image %ux%u scaled %ux%u layers %u format %d stencil %d samples-type %d\n", w, h,
+            (unsigned long long)z->gva, z->w, z->h, z->sw, z->sh, z->layers, (int)z->f.vk, z->f.stencil, (int)z->type); } }
     VkMemoryBarrier2 mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
                            .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFORM_FEEDBACK_BIT_EXT,
                            .srcAccessMask = VK_ACCESS_2_TRANSFORM_FEEDBACK_WRITE_BIT_EXT,
@@ -663,7 +666,9 @@ static u32 mv_pass(VkCommandBuffer cb, Surf* z, u32 w, u32 h) {
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_mv.pipe);
     VkRect2D sc = {{0, 0}, {w, h}};
     vkCmdSetScissor(cb, 0, 1, &sc);
-    for (u32 i = 0; i < g_mv.nrec[c]; i++) {
+    static int skipdraw = -1;
+    if (skipdraw < 0) skipdraw = getenv("SWR_DLSS_MV_SKIPDRAW") != NULL;
+    for (u32 i = 0; i < (skipdraw ? 0 : g_mv.nrec[c]); i++) {
         const XfbRec* r = &g_mv.rec[c][i];
         const XfbRec* q = NULL;
         for (u32 k = 0; k < g_mv.nrec[p] && !q; k++)
@@ -759,6 +764,15 @@ static void evaluate(Surf* t, Surf* z) {
                    VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL);
     else /* the pass read the depth as an attachment: back to compute reads for DLSS */
         vk_surf_use(cb, z, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+    if (mv_draws && getenv("SWR_DLSS_MV_ZERO")) { /* test: the pass ran, its vectors cleared */
+        vk_barrier(cb, g_dl.mv, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+                   VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        vkCmdClearColorImage(cb, g_dl.mv, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &all);
+        vk_barrier(cb, g_dl.mv, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                   VK_ACCESS_2_SHADER_READ_BIT, VK_IMAGE_LAYOUT_GENERAL);
+    }
     vk_barrier(cb, g_dl.out, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
                VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
     NgxResourceVK rc = res_image(t->att, t->img, t->f.vk, w, h, VK_IMAGE_ASPECT_COLOR_BIT, 0);
@@ -816,6 +830,10 @@ static void evaluate(Surf* t, Surf* z) {
                        &b, VK_FILTER_NEAREST);
     t->wgen++;
     vk_rt_drawn(t);
+    /* the motion-vector pass (and NGX) bound pipelines and state of their own in this command buffer: the next draw
+       sets all of its own again. Without this the draws after DLSS kept the replay pass's pipeline and viewport and
+       wrote nothing, so the scene held its old picture while the HUD moved on (2026-10-22) */
+    vk_render_forget_state();
     if (++g_dl.evals == 1 || g_dl.evals % 600 == 0)
         LOG("dlss: %d frames (scene %llx %ux%u, depth %llx); motion vectors from %u of %u captured draws, jitter %.3f %.3f; %d target switches, %d unjittered-safety holds\n",
             g_dl.evals, (unsigned long long)t->gva, w, h, (unsigned long long)z->gva, mv_draws > 1 ? mv_draws : 0,

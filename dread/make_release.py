@@ -201,7 +201,7 @@ def source(out):
     print('source: %s (%d files)' % (out, n))
 
 
-SOURCE_README = """# Metroid Dread — recompiled for PC (source)
+SOURCE_README = """# Metroid Dread — recompiled for PC
 
 One Windows EXE that sets up, configures and runs a native PC build of **your own** copy of Metroid Dread 2.1.0.
 It is the SwitchRecomp runtime (by MZ Labs) with a Metroid Dread front end built in: first-run setup that compiles

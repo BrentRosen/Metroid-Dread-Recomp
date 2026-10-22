@@ -2857,7 +2857,10 @@ retry:
     int dlss_xfb; /* SwitchRecomp, DLSS: a scene prepass draw's positions captured for motion vectors (dlss.c) */
     {
         u64 key = vs ? vs->hash : 0;
-        u64 parts[8] = {k->nbind ? (u64)(uintptr_t)vbuf[0] : 0, k->nbind ? voff[0] : 0, ia, first, count, base_vertex, base_instance, instances};
+        /* the draw by guest addresses: the host buffer and offset move between frames in this renderer (binding 0 can be
+           the per-frame constants, and buffers are suballocated), which paired draws with other draws of last frame:
+           wrong motion vectors, and DLSS held its old picture (2026-10-22) */
+        u64 parts[8] = {nvq ? vq[0].gva : 0, nvq ? vq[0].base : 0, ia, first, count, base_vertex, base_instance, instances};
         for (int i = 0; i < 8; i++) key = (key ^ parts[i]) * 0x100000001B3ull;
         dlss_xfb = !xcount && vk_dlss_capture_begin(cb, zt, zt && r[0x4BA] && r[0x4B3],
                                          topo == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST && !gs && !tes && !tcs, key,

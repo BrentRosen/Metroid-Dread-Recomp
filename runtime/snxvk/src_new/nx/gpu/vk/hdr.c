@@ -240,6 +240,7 @@ void vk_hdr_resolve(VkCommandBuffer cb, VkImage sc) {
     rec_CmdPushConstants(cb, g_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, &pc);
     rec_CmdDraw(cb, 3, 1, 0, 0);
     rec_CmdEndRendering(cb);
+    vk_render_forget_state(); /* its pipeline and state, not a draw's: the next draw sets all again */
     vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
