@@ -1,0 +1,52 @@
+# Metroid Dread — recompiled for PC (source)
+
+One Windows EXE that sets up, configures and runs a native PC build of **your own** copy of Metroid Dread 2.1.0.
+It is the SwitchRecomp runtime (by MZ Labs) with a Metroid Dread front end built in: first-run setup that compiles
+the game with a bundled GCC, a Play / settings screen, and an in-game menu (F1 or the Home / Guide button).
+
+**No Nintendo files are in this repository**: no game code, no RomFS, no keys, no generated C.
+
+- `dread/dread_v210_patches.json` holds small anchored edits that setup applies to the C it generates from the player's ExeFS.
+- `dread/romfs_v210.manifest` lists RomFS file names, sizes and SHA-1 hashes, so setup can verify the player's files.
+
+## Layout
+
+| path | what |
+|---|---|
+| `switchrecomp.py`, `codegen.py`, `a64.py`, `nxloader.py`, `metroid_perf.py` | SwitchRecomp: ARM64 → C translator (Apache-2.0) |
+| `runtime/` | the runtime: kernel, services, GPU → OpenGL, audio, video, input |
+| `runtime/dread_ui/` | front end: `fe.cpp` (setup, Play, settings), `ov.cpp` (in-game menu), `ui.cpp` (theme, widgets, settings table) |
+| `runtime/snxvk/` | ScarletNX's native Vulkan renderer (GPL-3.0, main b5f4f14) in `src_new/`, vendored, symbols prefixed `snxv_`, built without DLSS |
+| `dread/` | setup driver run by the EXE, patch set, RomFS manifest, release script, design notes |
+| `third_party/imgui-1.92.5/` | Dear ImGui (MIT) |
+| `linux/` | scripts for the Linux / Steam Deck build |
+
+## Build (Windows)
+
+You need two things in the repository root:
+
+- `gcc\` — winlibs GCC 14.2.0, UCRT, POSIX threads, in `gcc\Library\...`
+- `python\` — Python 3.12 for Windows
+- glslang 16.6.0 (Vulkan SDK or KhronosGroup release), for the renderer's compute shaders: `GLSLANG=` or on PATH
+
+```
+python\python.exe work-profiler\build_imgui.py
+set GLSLANG=<path to glslang.exe 16.6.0> && set SWR_NO_DLSS=1 && python\python.exe work-profiler\build_snxvk2.py
+set SWR_RELEASE=1 && python\python.exe switchrecomp.py --build-runtime --cc gcc
+python\python.exe dread\make_release.py release <empty folder> --exe bin\runtime_win64_win32.exe
+```
+
+The release step also needs `redist\zlib1.dll` (zlib 1.3.1, x64) and `redist\SDL2.dll` (SDL 2.x x64 release), the two
+DLLs the game ships beside it. They are not in this repository.
+
+## Licences
+
+- SwitchRecomp: Apache-2.0. The credit "SwitchRecomp by MZ Labs" and NOTICE.txt must be kept.
+- ScarletNX renderer: GPL-3.0, which makes the combined EXE GPL-3.0.
+- Dear ImGui: MIT.
+- libvpx and OpenH264: BSD.
+- SDL2 and zlib: zlib licence.
+
+The DLSS integration used in private builds is not part of this repository or the release.
+
+Metroid Dread is © Nintendo. This project is not affiliated with or endorsed by Nintendo.

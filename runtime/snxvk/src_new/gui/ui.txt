@@ -1,0 +1,88 @@
+# The launcher's scenes: tools/uigen makes gui/ui.h and gui/ui.c of them as it builds (its first comment has the
+# format), and main.c draws each in the area its screen gives it
+[scene]Menu {
+	# in the order of model.h's items, which main.c checks; the code gives the active one and the keys' state
+	[list]Entries {
+		attr = callback
+		# a finger's: 40px at the 3x a phone held wide gets is about 48dp, Android's touch target
+		android.row_height = 40px
+		[button]"Load Switch NSP/XCI/NRO" {}
+		[button]"Load Linux ARM ELF" {}
+		[button]"Load 3DS CIA" {}
+		[button]"Setup device keys" {}
+		[button]"Settings" {}
+		[button]"Share log" {}
+		[button]"Open data folder" {
+			for-platform = android
+		}
+		[button]"Exit" {}
+	}
+}
+[scene]Games {
+	# Add a folder over the page, a wider gap under it than between the games
+	gap = 24px
+	[list]Add {
+		height = 17px
+		android.height = 40px
+		android.row_height = 40px
+		max_rows = 1
+		[button]"Add a folder" {}
+	}
+	# Recent games over the recent rows, then a page of the games, as many as fit, each group under its heading
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+# the Settings and the theme editor: the groups, or the theme's keys, in the list's column; beside them, under the
+# side box's head, the open group's rows or the focused one's (Folders: on the whole screen, each group under its title)
+[scene]FormList {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+[scene]FormSide {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+# a question's choices, a row each: the setup page's, and those of a box over a screen (a question, UI scale's, the
+# folders a recompile's game may go in); main.c places the dialog as the theme's options-dialog says, and the rows in it
+[scene]Choices {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+# the setup's Appearance page: Settings > App's Language, Theme and UI scale, a row each, under the page box's head
+[scene]Appearance {
+	[list]Rows {
+		max_rows = 3
+		android.row_height = 40px
+	}
+}
+# the box of users a click on the head's user opens, a row each (its picture at its right), and the box of a game's
+# updates, DLCs and mods, which opening it shows
+[scene]Users {
+	[list]Rows {
+		max_rows = 8
+		android.row_height = 40px
+	}
+}
+[scene]Addons {
+	[list]Rows {
+		max_rows = 64
+		android.row_height = 40px
+	}
+}
+# the OK under the files of a box over the screen (what an older version left, what Clean old settings did): any key,
+# button or finger closes the box before a row is hit, so the row's own action is none (@)
+[scene]Files {
+	[list]Ok {
+		max_rows = 1
+		android.row_height = 40px
+		@[button]"OK" {}
+	}
+}

@@ -1,0 +1,176 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright 2026 the ScarletNX contributors
+# The SVC declarations and type sizes from Eden (tools/svc_generator.py's SVCS, TYPE_SIZES and TYPE_REPLACEMENTS):
+# SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
+# SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
+#
+# The kernel's SVCs, which tools/svcgen turns into svc.c's dispatch: each SVC's registers in the 64-bit and the 32-bit
+# ABI follow from its declaration (svcgen.c says how). The declarations are Eden's, as the kernel declares them, and
+# are not to be edited. What ScarletNX adds goes before the return type:
+#   stub    no handler: the SVC answers NotImplemented, logged (Eden's custom-ABI SVCs, 0x20, 0x42 and 0x7F, are stubs)
+#   quiet   left out of the crash report's ring of SVCs, which a polling loop would fill
+#   nowarn  no warning when it answers InvalidHandle (an SVC that returns no Result never warns)
+# Every other SVC has a handler in svc.c, svc_<Name>, with the arguments in their declared order.
+
+# type NAME SIZE32 SIZE64 CTYPE: its size in each ABI and what the handler takes it as ("-": a structure that no
+# handler takes yet). An Address, a Size and a ThreadFunc are 32 bits wide in the 32-bit ABI, and u64 in both
+type void 0 0 void
+type bool 1 1 u8
+type int32_t 4 4 i32
+type int64_t 8 8 i64
+type uint32_t 4 4 u32
+type uint64_t 8 8 u64
+type Result 4 4 u32
+type Handle 4 4 u32
+type Address 4 8 u64
+type Size 4 8 u64
+type ThreadFunc 4 8 u64
+type PhysicalAddress 8 8 u64
+type ArbitrationType 4 4 u32
+type BreakReason 4 4 u32
+type CodeMemoryOperation 4 4 u32
+type DebugThreadParam 4 4 u32
+type DeviceName 4 4 u32
+type HardwareBreakPointRegisterName 4 4 u32
+type InfoType 4 4 u32
+type InterruptType 4 4 u32
+type IoPoolType 4 4 u32
+type KernelDebugType 4 4 u32
+type KernelTraceState 4 4 u32
+type LimitableResource 4 4 u32
+type MemoryMapping 4 4 u32
+type MemoryPermission 4 4 u32
+type PageInfo 4 4 u32
+type ProcessActivity 4 4 u32
+type ProcessInfoType 4 4 u32
+type SignalType 4 4 u32
+type SystemInfoType 4 4 u32
+type ThreadActivity 4 4 u32
+type LastThreadContext 16 32 -
+type PhysicalMemoryInfo 16 24 -
+type SecureMonitorArguments 32 64 -
+
+# NUMBER [FLAGS] DECLARATION
+0x01 Result SetHeapSize(Address* out_address, Size size);
+0x02 Result SetMemoryPermission(Address address, Size size, MemoryPermission perm);
+0x03 Result SetMemoryAttribute(Address address, Size size, uint32_t mask, uint32_t attr);
+0x04 Result MapMemory(Address dst_address, Address src_address, Size size);
+0x05 Result UnmapMemory(Address dst_address, Address src_address, Size size);
+0x06 Result QueryMemory(Address out_memory_info, PageInfo* out_page_info, Address address);
+0x07 void ExitProcess();
+0x08 Result CreateThread(Handle* out_handle, ThreadFunc func, Address arg, Address stack_bottom, int32_t priority, int32_t core_id);
+0x09 Result StartThread(Handle thread_handle);
+0x0A void ExitThread();
+0x0B quiet void SleepThread(int64_t ns);
+0x0C Result GetThreadPriority(int32_t* out_priority, Handle thread_handle);
+0x0D Result SetThreadPriority(Handle thread_handle, int32_t priority);
+0x0E Result GetThreadCoreMask(int32_t* out_core_id, uint64_t* out_affinity_mask, Handle thread_handle);
+0x0F Result SetThreadCoreMask(Handle thread_handle, int32_t core_id, uint64_t affinity_mask);
+0x10 quiet int32_t GetCurrentProcessorNumber();
+0x11 Result SignalEvent(Handle event_handle);
+0x12 Result ClearEvent(Handle event_handle);
+0x13 Result MapSharedMemory(Handle shmem_handle, Address address, Size size, MemoryPermission map_perm);
+0x14 Result UnmapSharedMemory(Handle shmem_handle, Address address, Size size);
+0x15 Result CreateTransferMemory(Handle* out_handle, Address address, Size size, MemoryPermission map_perm);
+0x16 nowarn Result CloseHandle(Handle handle);
+0x17 Result ResetSignal(Handle handle);
+0x18 Result WaitSynchronization(int32_t* out_index, Address handles, int32_t num_handles, int64_t timeout_ns);
+0x19 Result CancelSynchronization(Handle handle);
+0x1A Result ArbitrateLock(Handle thread_handle, Address address, uint32_t tag);
+0x1B Result ArbitrateUnlock(Address address);
+0x1C Result WaitProcessWideKeyAtomic(Address address, Address cv_key, uint32_t tag, int64_t timeout_ns);
+0x1D void SignalProcessWideKey(Address cv_key, int32_t count);
+0x1E quiet int64_t GetSystemTick();
+0x1F Result ConnectToNamedPort(Handle* out_handle, Address name);
+0x20 stub Result SendSyncRequestLight(Handle session_handle);
+0x21 Result SendSyncRequest(Handle session_handle);
+0x22 Result SendSyncRequestWithUserBuffer(Address message_buffer, Size message_buffer_size, Handle session_handle);
+0x23 stub Result SendAsyncRequestWithUserBuffer(Handle* out_event_handle, Address message_buffer, Size message_buffer_size, Handle session_handle);
+0x24 Result GetProcessId(uint64_t* out_process_id, Handle process_handle);
+0x25 Result GetThreadId(uint64_t* out_thread_id, Handle thread_handle);
+0x26 void Break(BreakReason break_reason, Address arg, Size size);
+0x27 Result OutputDebugString(Address debug_str, Size len);
+0x28 void ReturnFromException(Result result);
+0x29 Result GetInfo(uint64_t* out, InfoType info_type, Handle handle, uint64_t info_subtype);
+0x2A void FlushEntireDataCache();
+0x2B Result FlushDataCache(Address address, Size size);
+0x2C Result MapPhysicalMemory(Address address, Size size);
+0x2D Result UnmapPhysicalMemory(Address address, Size size);
+0x2E stub Result GetDebugFutureThreadInfo(LastThreadContext* out_context, uint64_t* out_thread_id, Handle debug_handle, int64_t ns);
+0x2F stub Result GetLastThreadInfo(LastThreadContext* out_context, Address* out_tls_address, uint32_t* out_flags);
+0x30 Result GetResourceLimitLimitValue(int64_t* out_limit_value, Handle resource_limit_handle, LimitableResource which);
+0x31 Result GetResourceLimitCurrentValue(int64_t* out_current_value, Handle resource_limit_handle, LimitableResource which);
+0x32 Result SetThreadActivity(Handle thread_handle, ThreadActivity thread_activity);
+0x33 Result GetThreadContext3(Address out_context, Handle thread_handle);
+0x34 Result WaitForAddress(Address address, ArbitrationType arb_type, int32_t value, int64_t timeout_ns);
+0x35 Result SignalToAddress(Address address, SignalType signal_type, int32_t value, int32_t count);
+0x36 void SynchronizePreemptionState();
+0x37 Result GetResourceLimitPeakValue(int64_t* out_peak_value, Handle resource_limit_handle, LimitableResource which);
+0x39 stub Result CreateIoPool(Handle* out_handle, IoPoolType which);
+0x3A stub Result CreateIoRegion(Handle* out_handle, Handle io_pool, PhysicalAddress physical_address, Size size, MemoryMapping mapping, MemoryPermission perm);
+0x3C void KernelDebug(KernelDebugType kern_debug_type, uint64_t arg0, uint64_t arg1, uint64_t arg2);
+0x3D void ChangeKernelTraceState(KernelTraceState kern_trace_state);
+0x40 stub Result CreateSession(Handle* out_server_session_handle, Handle* out_client_session_handle, bool is_light, Address name);
+0x41 stub Result AcceptSession(Handle* out_handle, Handle port);
+0x42 stub Result ReplyAndReceiveLight(Handle handle);
+0x43 stub Result ReplyAndReceive(int32_t* out_index, Address handles, int32_t num_handles, Handle reply_target, int64_t timeout_ns);
+0x44 stub Result ReplyAndReceiveWithUserBuffer(int32_t* out_index, Address message_buffer, Size message_buffer_size, Address handles, int32_t num_handles, Handle reply_target, int64_t timeout_ns);
+0x45 Result CreateEvent(Handle* out_write_handle, Handle* out_read_handle);
+0x46 stub Result MapIoRegion(Handle io_region, Address address, Size size, MemoryPermission perm);
+0x47 stub Result UnmapIoRegion(Handle io_region, Address address, Size size);
+0x48 stub Result MapPhysicalMemoryUnsafe(Address address, Size size);
+0x49 stub Result UnmapPhysicalMemoryUnsafe(Address address, Size size);
+0x4A stub Result SetUnsafeLimit(Size limit);
+0x4B Result CreateCodeMemory(Handle* out_handle, Address address, Size size);
+0x4C Result ControlCodeMemory(Handle code_memory_handle, CodeMemoryOperation operation, uint64_t address, uint64_t size, MemoryPermission perm);
+0x4D stub void SleepSystem();
+0x4E stub Result ReadWriteRegister(uint32_t* out_value, PhysicalAddress address, uint32_t mask, uint32_t value);
+0x4F stub Result SetProcessActivity(Handle process_handle, ProcessActivity process_activity);
+0x50 stub Result CreateSharedMemory(Handle* out_handle, Size size, MemoryPermission owner_perm, MemoryPermission remote_perm);
+0x51 stub Result MapTransferMemory(Handle trmem_handle, Address address, Size size, MemoryPermission owner_perm);
+0x52 stub Result UnmapTransferMemory(Handle trmem_handle, Address address, Size size);
+0x53 stub Result CreateInterruptEvent(Handle* out_read_handle, int32_t interrupt_id, InterruptType interrupt_type);
+0x54 stub Result QueryPhysicalAddress(PhysicalMemoryInfo* out_info, Address address);
+0x55 stub Result QueryIoMapping(Address* out_address, Size* out_size, PhysicalAddress physical_address, Size size);
+0x56 stub Result CreateDeviceAddressSpace(Handle* out_handle, uint64_t das_address, uint64_t das_size);
+0x57 stub Result AttachDeviceAddressSpace(DeviceName device_name, Handle das_handle);
+0x58 stub Result DetachDeviceAddressSpace(DeviceName device_name, Handle das_handle);
+0x59 stub Result MapDeviceAddressSpaceByForce(Handle das_handle, Handle process_handle, uint64_t process_address, Size size, uint64_t device_address, uint32_t option);
+0x5A stub Result MapDeviceAddressSpaceAligned(Handle das_handle, Handle process_handle, uint64_t process_address, Size size, uint64_t device_address, uint32_t option);
+0x5C stub Result UnmapDeviceAddressSpace(Handle das_handle, Handle process_handle, uint64_t process_address, Size size, uint64_t device_address);
+0x5D Result InvalidateProcessDataCache(Handle process_handle, uint64_t address, uint64_t size);
+0x5E Result StoreProcessDataCache(Handle process_handle, uint64_t address, uint64_t size);
+0x5F Result FlushProcessDataCache(Handle process_handle, uint64_t address, uint64_t size);
+0x60 stub Result DebugActiveProcess(Handle* out_handle, uint64_t process_id);
+0x61 stub Result BreakDebugProcess(Handle debug_handle);
+0x62 stub Result TerminateDebugProcess(Handle debug_handle);
+0x63 stub Result GetDebugEvent(Address out_info, Handle debug_handle);
+0x64 stub Result ContinueDebugEvent(Handle debug_handle, uint32_t flags, Address thread_ids, int32_t num_thread_ids);
+0x65 stub Result GetProcessList(int32_t* out_num_processes, Address out_process_ids, int32_t max_out_count);
+0x66 stub Result GetThreadList(int32_t* out_num_threads, Address out_thread_ids, int32_t max_out_count, Handle debug_handle);
+0x67 stub Result GetDebugThreadContext(Address out_context, Handle debug_handle, uint64_t thread_id, uint32_t context_flags);
+0x68 stub Result SetDebugThreadContext(Handle debug_handle, uint64_t thread_id, Address context, uint32_t context_flags);
+0x69 stub Result QueryDebugProcessMemory(Address out_memory_info, PageInfo* out_page_info, Handle process_handle, Address address);
+0x6A stub Result ReadDebugProcessMemory(Address buffer, Handle debug_handle, Address address, Size size);
+0x6B stub Result WriteDebugProcessMemory(Handle debug_handle, Address buffer, Address address, Size size);
+0x6C stub Result SetHardwareBreakPoint(HardwareBreakPointRegisterName name, uint64_t flags, uint64_t value);
+0x6D stub Result GetDebugThreadParam(uint64_t* out_64, uint32_t* out_32, Handle debug_handle, uint64_t thread_id, DebugThreadParam param);
+0x6F stub Result GetSystemInfo(uint64_t* out, SystemInfoType info_type, Handle handle, uint64_t info_subtype);
+0x70 stub Result CreatePort(Handle* out_server_handle, Handle* out_client_handle, int32_t max_sessions, bool is_light, Address name);
+0x71 stub Result ManageNamedPort(Handle* out_server_handle, Address name, int32_t max_sessions);
+0x72 stub Result ConnectToPort(Handle* out_handle, Handle port);
+0x73 stub Result SetProcessMemoryPermission(Handle process_handle, uint64_t address, uint64_t size, MemoryPermission perm);
+0x74 stub Result MapProcessMemory(Address dst_address, Handle process_handle, uint64_t src_address, Size size);
+0x75 stub Result UnmapProcessMemory(Address dst_address, Handle process_handle, uint64_t src_address, Size size);
+0x76 stub Result QueryProcessMemory(Address out_memory_info, PageInfo* out_page_info, Handle process_handle, uint64_t address);
+0x77 stub Result MapProcessCodeMemory(Handle process_handle, uint64_t dst_address, uint64_t src_address, uint64_t size);
+0x78 stub Result UnmapProcessCodeMemory(Handle process_handle, uint64_t dst_address, uint64_t src_address, uint64_t size);
+0x79 stub Result CreateProcess(Handle* out_handle, Address parameters, Address caps, int32_t num_caps);
+0x7A stub Result StartProcess(Handle process_handle, int32_t priority, int32_t core_id, uint64_t main_thread_stack_size);
+0x7B stub Result TerminateProcess(Handle process_handle);
+0x7C stub Result GetProcessInfo(int64_t* out_info, Handle process_handle, ProcessInfoType info_type);
+0x7D stub Result CreateResourceLimit(Handle* out_handle);
+0x7E stub Result SetResourceLimitLimitValue(Handle resource_limit_handle, LimitableResource which, int64_t limit_value);
+0x7F stub void CallSecureMonitor(SecureMonitorArguments args);
+0x90 stub Result MapInsecureMemory(Address address, Size size);
+0x91 stub Result UnmapInsecureMemory(Address address, Size size);
