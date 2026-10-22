@@ -314,7 +314,7 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
     if target_win:
         cmd += ['-static', '-lgdi32', '-lwinmm', '-luser32', '-lopengl32', '-lcomdlg32', '-lshell32', '-mwindows' if backend == 'win32' else '-mconsole']
         if backend == 'win32': cmd += ['-lmfplat', '-lmfreadwrite', '-lmfuuid', '-lole32']
-        if frontend: cmd += ['-ld3d11', '-ldxgi', '-ld3dcompiler', '-ldwmapi', '-luuid', '-loleaut32']
+        if frontend: cmd += ['-ld3d11', '-ldxgi', '-ld3dcompiler', '-ldwmapi', '-luuid', '-loleaut32', '-lurlmon']
     else:
         cmd += ['-lpthread', '-ldl', '-lm', '-rdynamic']
         if backend == 'x11': cmd += ['-lX11', '-lGL']

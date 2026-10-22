@@ -282,3 +282,5 @@ __thread __attribute__((aligned(64))) char swr_tls_align64;
 int backend_gl_worker_current(void){ return 0; }
 
 int backend_glq_ok(void){ return 0; }   /* GL calls go through glq */
+
+int backend_pad_family(void){ return 0; }   /* no controller probe here: the game's own button icons */

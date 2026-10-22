@@ -1,6 +1,7 @@
 // Front end: files, the setup process, migration, save backups, mods, controllers and hardware detection.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <urlmon.h>   // URLDownloadToFileW: the button-icon packs
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <shellapi.h>
@@ -381,6 +382,31 @@ bool mod_import_zip(const std::string& zip, std::string* err) {
     std::string name = zip.substr(zip.find_last_of("\\/") + 1); name = name.substr(0, name.find_last_of('.'));
     if (!ok) { if (err) *err = "The zip could not be extracted."; }
     else ok = mod_import_folder(dir, name, err);
+    recycle(dir);
+    return ok;
+}
+// the community's button-prompt mods on GameBanana (each a romfs with the two prompt textures)
+const IconPack ICON_PACKS[3] = {
+    {"Switch to XBOX Layout", "Xbox", "Krydar", "https://gamebanana.com/dl/679191"},
+    {"Switch to PS4 Layout", "PlayStation 4", "Nova77", "https://gamebanana.com/dl/680684"},
+    {"Switch to PS5 Layout", "PlayStation 5", "xSeRosiSx", "https://gamebanana.com/dl/681751"},
+};
+bool icon_pack_installed(int i) { return dir_exists(join(join(mods_dir(), ICON_PACKS[i].name), "romfs")); }
+bool icon_pack_get(int i, std::string* err) {
+    wchar_t tmp[MAX_PATH]; GetTempPathW(MAX_PATH, tmp);
+    std::string dir = join(utf8(tmp), "dreadicons_" + now_stamp()); make_dirs(dir);
+    std::string arc = join(dir, "pack.bin");
+    if (URLDownloadToFileW(nullptr, wide(ICON_PACKS[i].url).c_str(), wide(arc).c_str(), 0, nullptr) != S_OK) {
+        if (err) *err = "Download failed: check the internet connection."; recycle(dir); return false; }
+    // zip or rar: Windows' bsdtar reads both, and refuses paths that leave -C
+    std::string out = join(dir, "x"); make_dirs(out);
+    wchar_t sys[MAX_PATH]; GetSystemDirectoryW(sys, MAX_PATH);
+    std::wstring cmd = L"\"" + std::wstring(sys) + L"\\tar.exe\" -xf \"" + wide(arc) + L"\" -C \"" + wide(out) + L"\"";
+    STARTUPINFOW si = {sizeof si}; PROCESS_INFORMATION pi; std::vector<wchar_t> c(cmd.begin(), cmd.end()); c.push_back(0);
+    if (!CreateProcessW(nullptr, c.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) { if (err) *err = "tar.exe could not start"; recycle(dir); return false; }
+    WaitForSingleObject(pi.hProcess, INFINITE); DWORD code = 1; GetExitCodeProcess(pi.hProcess, &code); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    bool ok = code == 0 && mod_import_folder(out, ICON_PACKS[i].name, err);
+    if (code != 0 && err) *err = "The download could not be extracted.";
     recycle(dir);
     return ok;
 }

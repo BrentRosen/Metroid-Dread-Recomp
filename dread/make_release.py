@@ -89,7 +89,7 @@ and 8BitDo over USB or Bluetooth. Keyboard: arrows = D-pad, WASD = stick, X/Z/C/
 
 Made by yozander2009-stack (project lead) with Claude by Anthropic (AI pair programmer).
 Credits: SwitchRecomp by MZ Labs (recompiler and runtime); ScarletNX (native Vulkan renderer); theboy181 (60 FPS cutscenes,
-21:9); Dear ImGui; SDL2; zlib; libvpx; OpenH264; GCC / MinGW-w64; Python. Licences are in the licenses folder; the EXE is
+21:9); Krydar, Nova77, xSeRosiSx (button-icon mods, downloaded on request; art: Xelu's FREE Controller Prompts); Dear ImGui; SDL2; zlib; libvpx; OpenH264; GCC / MinGW-w64; Python. Licences are in the licenses folder; the EXE is
 GPL-3.0 (it contains the ScarletNX renderer) and its source is published with this release.
 Metroid Dread is (c) Nintendo. This project is not affiliated with or endorsed by Nintendo.
 """
@@ -249,6 +249,10 @@ DLLs the game ships beside it. They are not in this repository.
 - **Claude** (Anthropic) — AI pair programmer: runtime fixes and performance work, the front end and in-game menu,
   setup, the Linux build, testing and documentation
 
+Button-icon packs (Controls > Button icons) are community mods downloaded from GameBanana when a player asks for
+them, not included here: Switch to XBOX Layout by Krydar, Switch to PS4 Layout by Nova77, Switch to PS5 Layout by
+xSeRosiSx, with PlayStation art from Xelu's FREE Controller Prompts.
+
 Third-party work this builds on is credited below and on the game's Credits page.
 
 ## Licences
@@ -270,9 +274,16 @@ if __name__ == '__main__':
         raise SystemExit(__doc__)
     if sys.argv[1] == 'release':
         exe = os.path.join(ROOT, 'bin', 'runtime_win64_win32.exe')
-        for a in sys.argv[3:]:
-            if a.startswith('--exe='):
-                exe = a[6:]
+        args = sys.argv[3:]
+        while args:   # --exe PATH or --exe=PATH (the spaced form was ignored before, which packaged bin\'s EXE)
+            a = args.pop(0)
+            if a == '--exe' and args: exe = args.pop(0)
+            elif a.startswith('--exe='): exe = a[6:]
+            else: raise SystemExit('unknown argument: %s' % a)
+        # the release EXE has the Play screen and no frame generation (SWR_RELEASE=1 with the front end)
+        data = open(exe, 'rb').read()
+        if b'RECOMPILED FOR PC' not in data or b'Lossless.dll' in data:
+            raise SystemExit('%s is not a release build: build it with SWR_RELEASE=1 (and the front end)' % exe)
         release(os.path.abspath(sys.argv[2]), exe)
     elif sys.argv[1] == 'source':
         source(os.path.abspath(sys.argv[2]))

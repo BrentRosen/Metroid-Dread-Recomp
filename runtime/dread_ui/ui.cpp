@@ -519,6 +519,9 @@ static std::vector<Opt> build_options() {
     B("audio_eos_sample_count", "Performance", "Audio", "Voice position fix at stream ends", LIVE_YES, "0", "Fixes cutscene music cutting out.");
     B("audio_surround_downmix", "Performance", "Audio", "Mix all six surround channels into stereo", LIVE_YES, "0", "");
     // Controls
+    C("button_icons", "Input", "Controls", "Button icons", LIVE_RESTART, "auto",
+      {{"auto", "Automatic"}, {"switch", "Switch (original)"}, {"xbox", "Xbox"}, {"ps4", "PlayStation 4"}, {"ps5", "PlayStation 5"}},
+      "Automatic: from the controller connected when the game starts. Xbox controllers and the Steam Deck get Xbox icons, DualShock 4 PS4 icons, DualSense PS5 icons, Switch controllers the originals.");
     C("controller_api", "Input", "Controls", "Controller support", LIVE_RESTART, "auto", {{"auto", "Automatic"}, {"sdl", "SDL2"}, {"xinput", "XInput"}},
       "Automatic: SDL2 (Switch Pro, Joy-Con, DualShock 4, DualSense, 8BitDo, Xbox) when SDL2.dll is next to the game, else XInput.");
     I("controller_index", "Input", "Controls", "Player 1 controller", LIVE_YES, "0", 0, 8, 1, "0 = any connected controller.", false);

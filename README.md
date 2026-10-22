@@ -45,6 +45,10 @@ DLLs the game ships beside it. They are not in this repository.
 - **Claude** (Anthropic) — AI pair programmer: runtime fixes and performance work, the front end and in-game menu,
   setup, the Linux build, testing and documentation
 
+Button-icon packs (Controls > Button icons) are community mods downloaded from GameBanana when a player asks for
+them, not included here: Switch to XBOX Layout by Krydar, Switch to PS4 Layout by Nova77, Switch to PS5 Layout by
+xSeRosiSx, with PlayStation art from Xelu's FREE Controller Prompts.
+
 Third-party work this builds on is credited below and on the game's Credits page.
 
 ## Licences

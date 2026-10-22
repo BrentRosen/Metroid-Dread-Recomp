@@ -85,6 +85,11 @@ void mods_write(const std::vector<Mod>& m);
 bool mod_import_folder(const std::string& src, const std::string& name, std::string* err);
 bool mod_import_zip(const std::string& zip, std::string* err);
 bool mod_remove(const std::string& name);
+// button-icon packs (Controls > Button icons): fixed folder names the runtime picks from (svc_fs.c)
+struct IconPack { const char* name; const char* label; const char* author; const char* url; };
+extern const IconPack ICON_PACKS[3];
+bool icon_pack_installed(int i);
+bool icon_pack_get(int i, std::string* err);   // downloads it from GameBanana and installs it
 std::string mods_dir();
 
 // ---------------------------------------------------------------- controllers (front end only; the game has its own)

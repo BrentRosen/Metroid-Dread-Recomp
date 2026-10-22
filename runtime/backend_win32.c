@@ -52,6 +52,7 @@ typedef DWORD (WINAPI *XSetState)(DWORD, XVIB*);
 static XSetState xset; static int g_xpad=-1;   /* the XInput pad input last came from: rumble goes there */
 
 static void xinput_load(void){
+  static int done; if(done) return; done=1;   /* also called early by backend_pad_family */
   const char* dl[]={"xinput1_4.dll","xinput1_3.dll","xinput9_1_0.dll"};
   for(int i=0;i<3 && !xget;i++){ HMODULE h=LoadLibraryA(dl[i]); if(h){ xget=(XGetState)GetProcAddress(h,"XInputGetState"); xset=(XSetState)GetProcAddress(h,"XInputSetState"); if(i<2) xget_ex=(XGetState)GetProcAddress(h,(LPCSTR)(size_t)100); } }
   if(xset){ extern void xinput_rumble_off(void); atexit(xinput_rumble_off); }
@@ -71,7 +72,9 @@ static unsigned char (*sdl_gcbutton)(SDLGC,int); static short (*sdl_gcaxis)(SDLG
 static void (*sdl_pump)(void);
 static int (*sdl_gcrumble)(SDLGC,unsigned short,unsigned short,unsigned);
 static int sdl_ok; static SDLGC sdl_pad[8]; static int sdl_npad; static u64 sdl_rescan;
+static int (*sdl_gctype)(int);   /* SDL_GameControllerTypeForIndex, SDL 2.0.12+ (optional) */
 static void sdl_load(void){
+  static int done; if(done) return; done=1;   /* also called early by backend_pad_family */
   extern int g_opt_ctrl_api; if(g_opt_ctrl_api==2) return;
   extern char g_exedir[]; char p[1200]; snprintf(p,sizeof p,"%sSDL2.dll",g_exedir);
   HMODULE h=LoadLibraryA(p); if(!h) h=LoadLibraryA("SDL2.dll");
@@ -82,7 +85,8 @@ static void sdl_load(void){
   SDLF(sdl_gcname,"SDL_GameControllerName") SDLF(sdl_gcbutton,"SDL_GameControllerGetButton") SDLF(sdl_gcaxis,"SDL_GameControllerGetAxis")
   SDLF(sdl_gcupdate,"SDL_GameControllerUpdate") SDLF(sdl_pump,"SDL_PumpEvents")
 #undef SDLF
-  *(FARPROC*)&sdl_gcrumble=GetProcAddress(h,"SDL_GameControllerRumble");   /* SDL 2.0.9+; optional: no rumble without it */
+  *(FARPROC*)&sdl_gcrumble=GetProcAddress(h,"SDL_GameControllerRumble");
+  *(FARPROC*)&sdl_gctype=GetProcAddress(h,"SDL_GameControllerTypeForIndex");   /* SDL 2.0.9+; optional: no rumble without it */
   sdl_sethint("SDL_GAMECONTROLLER_USE_BUTTON_LABELS","0");   /* positions, not printed labels */
   sdl_sethint("SDL_JOYSTICK_HIDAPI_PS4","1"); sdl_sethint("SDL_JOYSTICK_HIDAPI_PS5","1");
   sdl_sethint("SDL_JOYSTICK_HIDAPI_SWITCH","1"); sdl_sethint("SDL_JOYSTICK_HIDAPI_JOY_CONS","1"); sdl_sethint("SDL_JOYSTICK_HIDAPI_COMBINE_JOY_CONS","1");
@@ -93,6 +97,17 @@ static void sdl_load(void){
   sdl_sethint("SDL_JOYSTICK_RAWINPUT","0"); sdl_sethint("SDL_JOYSTICK_THREAD","1");
   if(sdl_init(0x00002000u|0x00000200u)!=0){ LOG("input: SDL2 could not start, using XInput\n"); return; }   /* GAMECONTROLLER|JOYSTICK */
   sdl_ok=1; LOG("input: SDL2 controllers active (XInput pads also read)\n"); }
+/* the kind of controller player 1 has, for the button icons (svc_fs.c), asked before the window and the input thread
+   exist: 1 Xbox (or any other), 2 DualShock 4, 3 DualSense, 4 Switch controllers, 0 none */
+static int sdl_family(int i){
+  int t= sdl_gctype? sdl_gctype(i) : 0;   /* SDL_GameControllerType: 1/2 Xbox, 3 PS3, 4 PS4, 5 Switch Pro, 7 PS5, 11-13 Joy-Con */
+  return t==4||t==3? 2 : t==7? 3 : t==5||t==11||t==12||t==13? 4 : 1; }
+int backend_pad_family(void){
+  extern int g_opt_ctrl_index; sdl_load(); xinput_load();
+  if(sdl_ok){ sdl_pump(); int n=sdl_numjoy(), k=0;
+    for(int j=0;j<n;j++) if(sdl_isgc(j)){ k++; if(g_opt_ctrl_index<=0 || k==g_opt_ctrl_index) return sdl_family(j); } }
+  if(xget){ for(DWORD i=0;i<4;i++){ XST s; if(xget(i,&s)==0) return 1; } }
+  return 0; }
 static void sdl_scan(void){
   for(int i=0;i<sdl_npad;) if(!sdl_gcattached(sdl_pad[i])){ LOG("input: controller disconnected: %s\n",sdl_gcname(sdl_pad[i])? sdl_gcname(sdl_pad[i]) : "?"); sdl_gcclose(sdl_pad[i]); sdl_pad[i]=sdl_pad[--sdl_npad]; } else i++;
   int n=sdl_numjoy();

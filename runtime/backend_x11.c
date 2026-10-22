@@ -46,7 +46,9 @@ static struct {
 static SDLGC* g_pad_gc; static u64 g_pad_scan;
 static int (*sdl_rumble)(SDLGC*, u16, u16, u32);
 
+static int (*sdl_gctype)(int);   /* SDL_GameControllerTypeForIndex, SDL 2.0.12+ (optional) */
 static void sdl_load(void){
+  static int done; if(done) return; done=1;   /* also called early by backend_pad_family */
   void* h=dlopen("libSDL2-2.0.so.0",RTLD_NOW|RTLD_LOCAL); if(!h) h=dlopen("libSDL2.so",RTLD_NOW|RTLD_LOCAL);
   if(!h){ LOG("controllers: SDL2 not found (install libsdl2), keyboard only\n"); return; }
   void** f[]={(void**)&sdl.Init,(void**)&sdl.SetHint,(void**)&sdl.NumJoysticks,(void**)&sdl.IsGameController,(void**)&sdl.Open,(void**)&sdl.Attached,
@@ -55,12 +57,21 @@ static void sdl_load(void){
                    "SDL_GameControllerClose","SDL_GameControllerUpdate","SDL_GameControllerGetButton","SDL_GameControllerGetAxis","SDL_GameControllerName"};
   for(int i=0;i<11;i++){ *f[i]=dlsym(h,n[i]); if(!*f[i]){ memset(&sdl,0,sizeof sdl); return; } }
   *(void**)&sdl_rumble=dlsym(h,"SDL_GameControllerRumble");   /* SDL 2.0.9+; optional */
+  *(void**)&sdl_gctype=dlsym(h,"SDL_GameControllerTypeForIndex");
   /* buttons by position like on Windows, also for Nintendo controllers that SDL would map by label */
   sdl.SetHint("SDL_GAMECONTROLLER_USE_BUTTON_LABELS","0");
   sdl.SetHint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS","1");
   if(sdl.Init(0x2000 /* SDL_INIT_GAMECONTROLLER */)){ memset(&sdl,0,sizeof sdl); return; }
 }
 
+/* the kind of controller connected, for the button icons (svc_fs.c), asked before the window exists: 1 Xbox or any
+   other (the Steam Deck's controls and Steam Input pads among them), 2 DualShock 4, 3 DualSense, 4 Switch, 0 none */
+int backend_pad_family(void){
+  sdl_load(); if(!sdl.Init) return 0;
+  for(int i=0;i<sdl.NumJoysticks();i++) if(sdl.IsGameController(i)){
+    int t= sdl_gctype? sdl_gctype(i) : 0;
+    return t==4||t==3? 2 : t==7? 3 : t==5||t==11||t==12||t==13? 4 : 1; }
+  return 0; }
 static i32 dz(i32 v){ return (v>-7000 && v<7000)? 0 : v; }
 
 static void pad_poll(u64* b, i32* lx, i32* ly, i32* rx, i32* ry){

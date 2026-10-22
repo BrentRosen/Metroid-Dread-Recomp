@@ -48,3 +48,5 @@ void frontend_frame(void){
 #if defined(_WIN32)
 void win_fatal_box(const char* msg){ MessageBoxA(NULL,msg,"SwitchRecomp",MB_OK|MB_ICONERROR); }
 #endif
+
+int backend_pad_family(void){ return 0; }   /* no controller probe here: the game's own button icons */

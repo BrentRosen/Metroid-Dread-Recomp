@@ -118,7 +118,7 @@ void tab_content(int t) {
     case 2: section("FRAME RATE"); opt_row("fps_limit"); opt_row("forced_vsync"); section("SCENES"); opt_row("cutscenes_60fps"); opt_row("loading_60fps");
             section("LOADING"); opt_row("fast_loading"); opt_row("fast_forward"); if (val("fast_forward") == "1") opt_row("fast_forward_speed"); break;
     case 3: section("OUTPUT"); opt_row("volume"); section("COMPATIBILITY"); opt_row("audio_eos_sample_count"); opt_row("audio_surround_downmix"); break;
-    case 4: section("CONTROLLER"); opt_row("stick_deadzone"); opt_row("rumble"); opt_row("menu_shortcut"); opt_row("controller_api");
+    case 4: section("CONTROLLER"); opt_row("button_icons"); opt_row("stick_deadzone"); opt_row("rumble"); opt_row("menu_shortcut"); opt_row("controller_api");
             help_text("Button mapping and menu buttons are on the Play screen's Controls page."); break;
     default: {
         section("KEYS");

@@ -18,7 +18,8 @@ int g_present_pacing_candidate;
 int g_opt_audio_surround_downmix=0;
 int g_opt_audio_eos_sample_count=0;
 char g_opt_pad_map[128]="";   /* physical-position button remapping, empty = identity */
-int g_opt_ctrl_api=0, g_opt_ctrl_index=0, g_opt_deadzone=7000;   /* [Input]: api 0 auto, 1 SDL2, 2 XInput */
+int g_opt_ctrl_api=0, g_opt_ctrl_index=0, g_opt_deadzone=7000;
+char g_opt_button_icons[16]="auto";   /* [Input] button_icons: auto, switch, xbox, ps4, ps5 (svc_fs.c romfs_apply_mods) */   /* [Input]: api 0 auto, 1 SDL2, 2 XInput */
 int g_opt_diag=0;
 int g_opt_docked=0, g_opt_lang=1, g_opt_res=1, g_opt_fps=1, g_opt_vsync=0, g_opt_drs=0;
 int g_opt_media_turns=1;   /* serialize_media_threads, read by kernel.c core0_member */
@@ -224,6 +225,7 @@ static const char* ini_get(const char* k, const char* def){ for(int i=0;i<g_ini_
 static void ini_apply(const char* k, const char* v){
     if(!strcmp(k,"docked")) g_opt_docked=atoi(v);
     else if(!strcmp(k,"controller_map")){ snprintf(g_opt_pad_map,sizeof g_opt_pad_map,"%s",v); }
+    else if(!strcmp(k,"button_icons")) snprintf(g_opt_button_icons,sizeof g_opt_button_icons,"%s",v);
     else if(!strcmp(k,"controller_api")) g_opt_ctrl_api= !strcmp(v,"sdl")? 1 : !strcmp(v,"xinput")? 2 : 0;
     else if(!strcmp(k,"controller_index")){ g_opt_ctrl_index=atoi(v); if(g_opt_ctrl_index<0) g_opt_ctrl_index=0; }
     else if(!strcmp(k,"rumble")){ extern int g_opt_rumble; g_opt_rumble=atoi(v); if(g_opt_rumble<0) g_opt_rumble=0; if(g_opt_rumble>200) g_opt_rumble=200; }   /* svc_hid.c */
@@ -335,6 +337,7 @@ static const IniOpt INI_FG[]={
   {NULL,NULL,NULL}};
 static const IniOpt INI_INPUT[]={
   {"controller_map","","16 comma-separated button destinations (0..15, -1 disabled); empty = default. Keyboard and sticks unchanged."},
+  {"button_icons","auto","the game's button pictures: auto = from the controller connected at start (Xbox and Steam Deck:\n;   Xbox icons, DualShock 4: PS4, DualSense: PS5, Switch or none: the originals), or switch, xbox, ps4, ps5.\n;   Needs the icon packs in Metroid Dread_data\\mods (the Play screen downloads them: Controls > Button icons)"},
   {"controller_api","auto","auto = SDL2 when SDL2.dll is next to the game (Bluetooth/USB Switch Pro, DualShock 4,\n;   DualSense, 8BitDo, Xbox...), else XInput. sdl or xinput to force one"},
   {"controller_index","0","0 = first connected controller, 1.. = that controller (in connection order) is player 1"},
   {"stick_deadzone","7000","stick dead zone (0..30000, out of 32767)"},

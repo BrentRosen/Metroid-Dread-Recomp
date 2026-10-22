@@ -315,6 +315,18 @@ static void page_controls() {
         std::string f = pick_file(g_hwnd, "Choose SDL2.dll", L"SDL2", L"SDL2.dll");
         if (!f.empty()) { if (CopyFileW(wide(f).c_str(), wide(join(P.exedir, "SDL2.dll")).c_str(), FALSE)) flash("SDL2.dll installed: restart the launcher to use it"); else flash("Copy failed"); }
     }
+    section("BUTTON ICONS");
+    draw_opt("button_icons");
+    for (int i = 0; i < 3; i++) {
+        const IconPack& k = ICON_PACKS[i];
+        bool have = icon_pack_installed(i);
+        if (have) row_text(fmt("%s icons", k.label).c_str(), fmt("Installed  (by %s)", k.author).c_str(), C_OK);
+        else if (row_button(fmt("##ip%d", i).c_str(), fmt("%s icons: not installed  (by %s, from GameBanana)", k.label, k.author).c_str(), "GET")) {
+            flash("Downloading..."); std::string err;
+            if (icon_pack_get(i, &err)) flash(fmt("%s icons installed", k.label)); else flash(err);
+        }
+    }
+    help_text("Icon packs are community mods from gamebanana.com, downloaded only when you press GET. Applies at the next game start.");
     section("PLAYER 1");
     int cur = atoi(get("controller_index").c_str());
     auto pads = pads_list(); int k = 0;
@@ -385,6 +397,8 @@ static void page_mods() {
     bool ch = false;
     for (int i = 0; i < (int)g_mods.size(); i++) {
         Mod& m = g_mods[i]; bool en = m.enabled;
+        bool icons = false; for (int k = 0; k < 3; k++) if (m.name == ICON_PACKS[k].name) icons = true;
+        if (icons) { row_text(m.name.c_str(), "Button icons: chosen under Controls", C_DIM); continue; }
         std::string label = fmt("%s   (%d files, %.1f MB)", m.name.c_str(), m.files, m.bytes / 1048576.0);
         if (row_bool(fmt("##mod%d", i).c_str(), label.c_str(), &en)) { m.enabled = en; ch = true; }
         if (ImGui::IsItemFocused()) g_mod_sel = i;
@@ -449,6 +463,8 @@ static void page_about() {
         {"Claude (Anthropic)", "AI pair programmer: runtime fixes and performance work, this front end and in-game menu, setup, the Linux build, testing and documentation."},
         {"SwitchRecomp by MZ Labs", "The static recompiler and runtime this build is made from (Apache-2.0). \"SwitchRecomp by MZ Labs\" credit and NOTICE kept."},
         {"ScarletNX contributors", "Native Vulkan renderer: GPU front end, Maxwell to SPIR-V shader translation (GPL-3.0)."},
+        {"Krydar, Nova77, xSeRosiSx", "Button-icon mods: Switch to XBOX Layout (Krydar), Switch to PS4 Layout (Nova77), Switch to PS5 Layout (xSeRosiSx), downloaded from gamebanana.com when you choose them."},
+        {"Xelu's FREE Controller Prompts", "The PlayStation button art in those icon mods."},
         {"theboy181", "60 FPS cutscenes, 21:9 ultrawide and other Dread patches (github.com/theboy181/switch-ptchtxt-mods); 21:9 commissioned by Nikorasu081."},
         {"Dear ImGui by Omar Cornut", "This interface (MIT)."},
         {"SDL2 (Sam Lantinga and contributors)", "Controller support (zlib licence)."},

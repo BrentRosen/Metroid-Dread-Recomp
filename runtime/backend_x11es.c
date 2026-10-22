@@ -98,3 +98,5 @@ void frontend_frame(void){
 int backend_gl_worker_current(void){ return 0; }
 
 int backend_glq_ok(void){ return 0; }   /* GL calls go through glq */
+
+int backend_pad_family(void){ return 0; }   /* no controller probe here: the game's own button icons */
