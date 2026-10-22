@@ -1,4 +1,4 @@
-# Metroid Dread — recompiled for PC 
+# Metroid Dread — recompiled for PC (source)
 
 One Windows EXE that sets up, configures and runs a native PC build of **your own** copy of Metroid Dread 2.1.0.
 It is the SwitchRecomp runtime (by MZ Labs) with a Metroid Dread front end built in: first-run setup that compiles
@@ -16,7 +16,7 @@ the game with a bundled GCC, a Play / settings screen, and an in-game menu (F1 o
 | `switchrecomp.py`, `codegen.py`, `a64.py`, `nxloader.py`, `metroid_perf.py` | SwitchRecomp: ARM64 → C translator (Apache-2.0) |
 | `runtime/` | the runtime: kernel, services, GPU → OpenGL, audio, video, input |
 | `runtime/dread_ui/` | front end: `fe.cpp` (setup, Play, settings), `ov.cpp` (in-game menu), `ui.cpp` (theme, widgets, settings table) |
-| `runtime/snxvk/` | ScarletNX's native Vulkan renderer (GPL-3.0, main b5f4f14) in `src_new/`, vendored, symbols prefixed `snxv_`, built without DLSS |
+| `runtime/snxvk/` | ScarletNX's native Vulkan renderer (GPL-3.0, main b5f4f14) in `src_new/`, vendored, symbols prefixed `snxv_`; our DLSS code in `src_new/nx/gpu/vk/dlss.c` |
 | `dread/` | setup driver run by the EXE, patch set, RomFS manifest, release script, design notes |
 | `third_party/imgui-1.92.5/` | Dear ImGui (MIT) |
 | `linux/` | scripts for the Linux / Steam Deck build |
@@ -47,6 +47,7 @@ DLLs the game ships beside it. They are not in this repository.
 - libvpx and OpenH264: BSD.
 - SDL2 and zlib: zlib licence.
 
-The DLSS integration used in private builds is not part of this repository or the release.
+NVIDIA DLAA: the code is here (`dlss.c`), NVIDIA's files are not, and the release is built without it. To add it to
+your own build, see [DLSS.md](DLSS.md). A build with DLSS is for your own use only: never share it.
 
 Metroid Dread is © Nintendo. This project is not affiliated with or endorsed by Nintendo.

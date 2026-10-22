@@ -140,8 +140,8 @@ def release(out, exe):
     print('release: %s (%.0f MB), zip %s (%.0f MB)' % (dst, size / 2**20, z, os.path.getsize(z) / 2**20))
 
 
-SRC_IGNORE = ['*.o', '*.a', '*.obj', '*.exe', '*.dll', '__pycache__', 'obj', 'obj_nodlss', 'obj_new', 'obj_new_nodlss', 'dlss.c',
-              'dlss_mv*', '*.tmp', '*.before*', '*.orig', '*.rej', 'externals.txt',
+SRC_IGNORE = ['*.o', '*.a', '*.obj', '*.exe', '*.dll', '__pycache__', 'obj', 'obj_nodlss', 'obj_new', 'obj_new_nodlss',
+              '*.tmp', '*.before*', '*.orig', '*.rej', 'externals.txt',
               'lsfg.c', 'lsfg_spvc.cpp', 'spvc']   # no frame generation (it loads Lossless Scaling's DLL) in the public source
 
 
@@ -184,7 +184,7 @@ def source(out):
         for ext in ('.cpp', '.h'):
             cp(os.path.join(im, 'backends', f + ext), os.path.join(out, 'third_party', 'imgui-1.92.5', 'backends', f + ext))
     cp(os.path.join(im, 'backends', 'imgui_impl_opengl3_loader.h'), os.path.join(out, 'third_party', 'imgui-1.92.5', 'backends', 'imgui_impl_opengl3_loader.h'))
-    for f in ('build_imgui.py', 'build_snxvk2.py', 'gen_hdr_spv.py'):
+    for f in ('build_imgui.py', 'build_snxvk2.py', 'gen_spv_headers.py'):
         cp(os.path.join(ROOT, 'work-profiler', f), os.path.join(out, 'work-profiler', f))
     for f in os.listdir(os.path.join(ROOT, 'linux')):
         p = os.path.join(ROOT, 'linux', f)
@@ -196,6 +196,7 @@ def source(out):
     # line endings exactly as written (some runtime files are CRLF by rule, the Linux scripts must stay LF)
     open(os.path.join(out, '.gitattributes'), 'w', newline='\n').write('* -text\n')
     open(os.path.join(out, 'README.md'), 'w').write(SOURCE_README)
+    cp(os.path.join(ROOT, 'dread', 'DLSS.md'), os.path.join(out, 'DLSS.md'))
     n = sum(len(fn) for dp, dn, fn in os.walk(out))
     print('source: %s (%d files)' % (out, n))
 
@@ -218,7 +219,7 @@ the game with a bundled GCC, a Play / settings screen, and an in-game menu (F1 o
 | `switchrecomp.py`, `codegen.py`, `a64.py`, `nxloader.py`, `metroid_perf.py` | SwitchRecomp: ARM64 → C translator (Apache-2.0) |
 | `runtime/` | the runtime: kernel, services, GPU → OpenGL, audio, video, input |
 | `runtime/dread_ui/` | front end: `fe.cpp` (setup, Play, settings), `ov.cpp` (in-game menu), `ui.cpp` (theme, widgets, settings table) |
-| `runtime/snxvk/` | ScarletNX's native Vulkan renderer (GPL-3.0, main b5f4f14) in `src_new/`, vendored, symbols prefixed `snxv_`, built without DLSS |
+| `runtime/snxvk/` | ScarletNX's native Vulkan renderer (GPL-3.0, main b5f4f14) in `src_new/`, vendored, symbols prefixed `snxv_`; our DLSS code in `src_new/nx/gpu/vk/dlss.c` |
 | `dread/` | setup driver run by the EXE, patch set, RomFS manifest, release script, design notes |
 | `third_party/imgui-1.92.5/` | Dear ImGui (MIT) |
 | `linux/` | scripts for the Linux / Steam Deck build |
@@ -249,7 +250,8 @@ DLLs the game ships beside it. They are not in this repository.
 - libvpx and OpenH264: BSD.
 - SDL2 and zlib: zlib licence.
 
-The DLSS integration used in private builds is not part of this repository or the release.
+NVIDIA DLAA: the code is here (`dlss.c`), NVIDIA's files are not, and the release is built without it. To add it to
+your own build, see [DLSS.md](DLSS.md). A build with DLSS is for your own use only: never share it.
 
 Metroid Dread is © Nintendo. This project is not affiliated with or endorsed by Nintendo.
 """
