@@ -1,4 +1,4 @@
-# Metroid Dread — recompiled for PC 
+# Metroid Dread — recompiled for PC
 
 One Windows EXE that sets up, configures and runs a native PC build of **your own** copy of Metroid Dread 2.1.0.
 It is the SwitchRecomp runtime (by MZ Labs) with a Metroid Dread front end built in: first-run setup that compiles
@@ -38,6 +38,14 @@ python\python.exe dread\make_release.py release <empty folder> --exe bin\runtime
 
 The release step also needs `redist\zlib1.dll` (zlib 1.3.1, x64) and `redist\SDL2.dll` (SDL 2.x x64 release), the two
 DLLs the game ships beside it. They are not in this repository.
+
+## Contributors
+
+- **yozander2009-stack** — project lead
+- **Claude** (Anthropic) — AI pair programmer: runtime fixes and performance work, the front end and in-game menu,
+  setup, the Linux build, testing and documentation
+
+Third-party work this builds on is credited below and on the game's Credits page.
 
 ## Licences
 

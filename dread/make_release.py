@@ -87,6 +87,7 @@ setup compiles it on your PC. No Nintendo files, keys or firmware are included.
 Controllers: Xbox controllers work as they are; SDL2.dll (included) adds Switch Pro, Joy-Con, DualShock 4, DualSense
 and 8BitDo over USB or Bluetooth. Keyboard: arrows = D-pad, WASD = stick, X/Z/C/V = A/B/X/Y, Enter = +, Backspace = -.
 
+Made by yozander2009-stack (project lead) with Claude by Anthropic (AI pair programmer).
 Credits: SwitchRecomp by MZ Labs (recompiler and runtime); ScarletNX (native Vulkan renderer); theboy181 (60 FPS cutscenes,
 21:9); Dear ImGui; SDL2; zlib; libvpx; OpenH264; GCC / MinGW-w64; Python. Licences are in the licenses folder; the EXE is
 GPL-3.0 (it contains the ScarletNX renderer) and its source is published with this release.
@@ -241,6 +242,14 @@ python\\python.exe dread\\make_release.py release <empty folder> --exe bin\\runt
 
 The release step also needs `redist\\zlib1.dll` (zlib 1.3.1, x64) and `redist\\SDL2.dll` (SDL 2.x x64 release), the two
 DLLs the game ships beside it. They are not in this repository.
+
+## Contributors
+
+- **yozander2009-stack** — project lead
+- **Claude** (Anthropic) — AI pair programmer: runtime fixes and performance work, the front end and in-game menu,
+  setup, the Linux build, testing and documentation
+
+Third-party work this builds on is credited below and on the game's Credits page.
 
 ## Licences
 

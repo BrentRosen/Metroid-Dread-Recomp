@@ -445,6 +445,8 @@ static void page_advanced() {
 static void page_about() {
     page_title("CREDITS", "Metroid Dread recompiled for PC. Metroid Dread is \xC2\xA9 Nintendo; this program contains none of its files and needs your own copy.");
     struct C { const char* who; const char* what; } cs[] = {
+        {"yozander2009-stack", "Project lead: this Metroid Dread PC version, its testing and its direction."},
+        {"Claude (Anthropic)", "AI pair programmer: runtime fixes and performance work, this front end and in-game menu, setup, the Linux build, testing and documentation."},
         {"SwitchRecomp by MZ Labs", "The static recompiler and runtime this build is made from (Apache-2.0). \"SwitchRecomp by MZ Labs\" credit and NOTICE kept."},
         {"ScarletNX contributors", "Native Vulkan renderer: GPU front end, Maxwell to SPIR-V shader translation (GPL-3.0)."},
         {"theboy181", "60 FPS cutscenes, 21:9 ultrawide and other Dread patches (github.com/theboy181/switch-ptchtxt-mods); 21:9 commissioned by Nikorasu081."},
