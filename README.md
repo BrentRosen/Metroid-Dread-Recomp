@@ -50,6 +50,8 @@ them, not included here: Switch to XBOX Layout by Krydar, Switch to PS4 Layout b
 xSeRosiSx, with PlayStation art from Xelu's FREE Controller Prompts.
 
 Third-party work this builds on is credited below and on the game's Credits page.
+DISCLAIMER
+Claude was used
 
 ## Licences
 
