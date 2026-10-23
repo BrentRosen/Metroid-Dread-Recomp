@@ -253,6 +253,10 @@ static void page_play() {
     if (row_button("##bk", "Back up saves now", "BACK UP")) { std::string z, e; if (backup_saves(&z, &e)) flash("Saves backed up: " + z); else flash("Backup failed: " + e); }
     if (row_button("##ob", "Open backups folder", "OPEN")) { make_dirs(backups_dir()); open_in_explorer(backups_dir()); }
     if (row_button("##os", "Open saves folder", "OPEN")) { if (have) open_in_explorer(join(P.data, "save")); else flash("No saves yet."); }
+    section("STEAM");
+    if (row_button("##steam", "Add Metroid Dread to Steam as a non-Steam game", "ADD")) {
+        std::string m; steam_add_shortcut(P.exe, P.exedir, m); flash(m); }
+    help_text("Uses this game's icon. Steam is closed and started again if it's running.");
     section("FOLDERS");
     if (row_button("##gf", "Game folder", "OPEN")) open_in_explorer(P.exedir);
     if (row_button("##sc", "Screenshots and recordings", "OPEN")) { make_dirs(join(P.exedir, "captures")); open_in_explorer(join(P.exedir, "captures")); }

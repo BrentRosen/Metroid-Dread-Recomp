@@ -90,6 +90,7 @@ struct IconPack { const char* name; const char* label; const char* author; const
 extern const IconPack ICON_PACKS[3];
 bool icon_pack_installed(int i);
 bool icon_pack_get(int i, std::string* err);   // downloads it from GameBanana and installs it
+int steam_add_shortcut(const std::string& exe, const std::string& dir, std::string& msg);   // fe_steam.cpp: 1 added, 0 already there, -1 error
 std::string mods_dir();
 
 // ---------------------------------------------------------------- controllers (front end only; the game has its own)

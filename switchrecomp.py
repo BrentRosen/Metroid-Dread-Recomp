@@ -280,6 +280,12 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
         else: spvc = None
     if gl and not spvc: srcs += [os.path.join(RT, 'lsfg_stub.c')]
     if target_win and backend == 'win32': srcs += [os.path.join(RT, 'rec_win32.c')]   # F7 recorder, Media Foundation
+    if target_win and backend == 'win32' and os.path.isfile(os.path.join(RT, 'app.rc')):   # the EXE's icon (runtime/app.ico)
+        wr = os.path.join(os.path.dirname(cc) if os.path.dirname(cc) else '', 'windres.exe')
+        if not os.path.isfile(wr): wr = shutil.which('windres') or ''
+        res = os.path.join(HERE, 'bin', 'app_res.o')
+        if wr and subprocess.run([wr, '-i', os.path.join(RT, 'app.rc'), '-o', res, '-O', 'coff', '--include-dir', RT], capture_output=True).returncode == 0:
+            srcs += [res]
     # NVDEC/VIC video: link OpenH264 (BSD) statically if we have it for this target
     oh = os.path.join(RT, 'oh264', 'win' if target_win else 'lin')
     h264 = os.path.isfile(os.path.join(oh, 'libdecoder.a')) and backend in ('win32', 'x11', 'headless')
@@ -289,7 +295,7 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
     # Metroid Dread front end + in-game menu (Dear ImGui, runtime/dread_ui); prebuilt by work-profiler/build_imgui.py
     imgui = os.path.join(RT, 'imgui', 'libimgui.a')
     frontend = os.path.isfile(imgui) and target_win and backend == 'win32' and not os.environ.get('SWR_NO_FRONTEND')
-    if frontend: srcs += [os.path.join(RT, 'dread_ui', f) for f in ('ui.cpp', 'fe.cpp', 'fe_sys.cpp', 'ov.cpp')]
+    if frontend: srcs += [os.path.join(RT, 'dread_ui', f) for f in ('ui.cpp', 'fe.cpp', 'fe_sys.cpp', 'fe_steam.cpp', 'ov.cpp')]
     # Linux (X11): the in-game menu from ImGui's sources (runtime/imgui/src, copied there by build_imgui.py), no Play screen
     overlay = not frontend and backend == 'x11' and os.path.isfile(os.path.join(RT, 'imgui', 'src', 'imgui.cpp')) and not os.environ.get('SWR_NO_FRONTEND')
     if overlay: srcs += [os.path.join(RT, 'dread_ui', f) for f in ('ui.cpp', 'ov.cpp', 'stub_fe.c')] + [os.path.join(RT, 'imgui', 'src', f) for f in ('imgui.cpp', 'imgui_draw.cpp', 'imgui_tables.cpp', 'imgui_widgets.cpp', 'imgui_impl_opengl3.cpp')]
