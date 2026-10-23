@@ -208,7 +208,7 @@ void snxvk_present(u64 a, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt)
   static u64 st_n, st_wait, st_pres, st_gap, last_out;   /* SWR_SNXVK_TRACE: averages every 600 presents */
   u64 t_in=plat_ns(), t_w=t_in;
   if(snxvk_pacing()){ extern volatile int g_pace_fps; static u64 deadline; int pf=g_pace_fps;   /* g_opt_fps, or 60 during slow motion */
-    u64 per= pf>=60 && pf<=240? 1000000000ull/(u64)pf : 16666667ull;
+    u64 per= pf>=30 && pf<=240? 1000000000ull/(u64)pf : 16666667ull;   /* 30: cinematics (main.c pace_update) */
     u64 next=deadline+per; if(deadline) wait_deadline(next);
     u64 now=plat_ns(); t_w=now; deadline= deadline && (i64)(now-next)<(i64)(per/2)? next : now; }
   { static u64 last_in; u64 t0=plat_ns(); snxv_vk_renderer.present_buffer(a,w,h,pitch,layout,bhl,fmt,crop,0); u64 t1=plat_ns();

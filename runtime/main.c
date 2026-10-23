@@ -561,6 +561,18 @@ static void pace_update(void){
       static int was; int slow= s>0.0f && s<0.95f;
       if(slow!=was){ was=slow; LOG("slow motion %s (time scale %.3f): pacing at %d FPS\n",slow?"started":"ended",s,slow?60:f); }
       if(slow) f=60; } }
+  /* Cinematics run at 30: the main loop sets its frame timer's target ([[GOT 0x9CBF0E8]] +64, float) to 30 and the game
+     makes a new picture every ~33 ms, give or take 2 ms. Shown the moment each arrives, they stayed on screen 29 or 37 ms
+     on a 240 Hz monitor (MEASURED, hold-0: 32-35 ms gaps) and stuttered; the Switch shows them every second 60 Hz
+     refresh. So while the target is 30 the pacers present on an exact 33.3 ms grid. Only when finished pictures are
+     shown changes. Not with the 60 FPS cutscene patch; SWR_NO_CINEMATIC_30=1 = old behaviour (tests) */
+  { static int no30=-1; if(no30<0) no30=getenv("SWR_NO_CINEMATIC_30")!=NULL;
+    static int was30; int c30=0;
+    if(!no30 && f!=0){ char b[8]; const char* e=getenv("SWR_CUTSCENES_60FPS"); (void)b;
+      if(!(e && e[0]=='1')){ u64 g=*(volatile u64*)GP(0x9CBF0E8ull); u64 t= (g && g<(1ull<<40))? *(volatile u64*)GP(g) : 0;
+        if(t && t<(1ull<<40)){ float fps; u32 v=*(volatile u32*)GP(t+64); memcpy(&fps,&v,4); c30= fps>29.0f && fps<31.0f; } } }
+    if(c30!=was30){ was30=c30; LOG("cinematic pacing: %s\n",c30? "30 FPS, even 33.3 ms frames" : "back to the frame cap"); }
+    if(c30) f=30; }
   g_pace_fps=f; }
 
 void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt){
@@ -599,7 +611,7 @@ void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layou
     }
   }
   /* while recording keep at least the 60 cap, uncapped + per-frame logic = sped up video */
-  if(g_opt_fps || g_rec_active){ int pf=g_pace_fps; u64 per= pf>=60 && pf<=240? 1000000000ull/(u64)pf : 16666667ull;
+  if(g_opt_fps || g_rec_active){ int pf=g_pace_fps; u64 per= pf>=30 && pf<=240? 1000000000ull/(u64)pf : 16666667ull;
     if(g_opt_fps>=10 && g_opt_fps<60){ static int said; if(!said){ said=1; WARN("fps_limit=%d would run the game at %d%% speed (one game step per image): using 60\n",g_opt_fps,g_opt_fps*100/60); } }
     u64 now=plat_ns(); u64 next=g_last_present+per;
     if(limiter_trace){trace_begin=now;trace_deadline=next;}
