@@ -18,3 +18,21 @@ release/
 *.log
 shader_cache/
 vulkan_native/
+
+# never commit binaries, archives or game files
+*.exe
+*.dll
+*.pdb
+*.zip
+*.7z
+*.rar
+*.nsp
+*.xci
+*.nca
+*.nso
+*.keys
+exefs/
+romfs/
+ExeFS/
+RomFS/
+mods/

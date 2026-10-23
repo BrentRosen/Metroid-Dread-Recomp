@@ -26,12 +26,25 @@ the game with a bundled GCC, a Play / settings screen, and an in-game menu (F1 o
 | `third_party/imgui-1.92.5/` | Dear ImGui (MIT) |
 | `linux/` | scripts for the Linux / Steam Deck build |
 
-## Build (Windows)
+## Setting up the game (players)
 
-You need two things in the repository root:
+Download the release zip, not this repository. On first start the EXE asks for your game files and compiles the game.
+It needs **both** parts of your own dumped copy of Metroid Dread **2.1.0**:
 
-- `gcc\` — winlibs GCC 14.2.0, UCRT, POSIX threads, in `gcc\Library\...`
-- `python\` — Python 3.12 for Windows
+- the **ExeFS** (the game code: the files `main`, `main.npdm`, ...)
+- the **RomFS** (the game data: `system`, `packs`, ...), with the 2.1.0 update merged in
+
+A RomFS dump on its own is not enough. Choose the folder that holds both; they can be a few folders down (a dump
+folder with one folder per title is fine). If you have the base game and the update as separate dumps, choose the
+update as "Update folder". Every RomFS file is checked against the 2.1.0 file list before anything is compiled.
+
+## Build from source (Windows)
+
+The toolchain is **not** in this repository and never was: the paths below are where you put your own downloads.
+The release zip bundles the same GCC and Python so that setup can compile the game on the player's PC.
+
+- `gcc\` in the repository root: [winlibs](https://winlibs.com) GCC 14.2.0, UCRT, POSIX threads, x64
+- `python\` in the repository root: Python 3.12 for Windows (the embeddable package is enough)
 - glslang 16.6.0 (Vulkan SDK or KhronosGroup release), for the renderer's compute shaders: `GLSLANG=` or on PATH
 
 ```
@@ -43,6 +56,17 @@ python\python.exe dread\make_release.py release <empty folder> --exe bin\runtime
 
 The release step also needs `redist\zlib1.dll` (zlib 1.3.1, x64) and `redist\SDL2.dll` (SDL 2.x x64 release), the two
 DLLs the game ships beside it. They are not in this repository.
+
+## What is in this repository
+
+- Source code only, plus three prebuilt third-party static libraries, kept so the build does not need MSYS2:
+  `runtime/vp9/win/libvpx.a` (libvpx 1.14.1, VP9 decoder only, build options in `runtime/vp9/README.txt`) and
+  `runtime/oh264/win/*.a` (OpenH264 decoder). Rebuild them from the upstream sources if you prefer.
+- `.gitignore` keeps out toolchains, build output, EXEs, DLLs, archives and anything from a game folder.
+- `dread/dread_v210_patches.json` holds **our** edits only: for each patched file, the SHA-256 of the C that setup
+  generates from the player's ExeFS, the line range to replace, and the replacement lines we wrote (frame pacing,
+  vector growth, zlib, cutscene skip). It contains no game code, no data from the game and no decryption.
+- `dread/romfs_v210.manifest` lists RomFS file names, sizes and SHA-1 hashes, used only to check the player's files.
 
 ## Contributors
 
@@ -58,10 +82,17 @@ The program icon is the [Metroid icon created by Smashicons - Flaticon](https://
 (Flaticon licence, free with attribution).
 
 Third-party work this builds on is credited below and on the game's Credits page.
-DISCLAIMER
-AI was used
+
+## AI use
+
+Large parts of this project were written with Claude (Anthropic), not only boilerplate: runtime fixes, performance
+work, the front end, setup and the build scripts. Every change was built and tested on real hardware before release,
+and each fix was measured. The source is all here: read it, build it yourself, and report anything that looks wrong.
 
 ## Licences
+
+**The released EXE is distributed under GPL-3.0** (`LICENSE-GPL-3.0.txt`), because it contains the ScarletNX renderer.
+Each source file keeps its own licence; Apache-2.0 and MIT code is GPL-3.0-compatible.
 
 - SwitchRecomp: Apache-2.0. The credit "SwitchRecomp by MZ Labs" and NOTICE.txt must be kept.
 - ScarletNX renderer: GPL-3.0, which makes the combined EXE GPL-3.0.
