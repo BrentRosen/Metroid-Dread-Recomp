@@ -1347,9 +1347,14 @@ static u8* sk_read(const char* rel, size_t* n){
   if(g_romfs_dir_override[0]) snprintf(p,sizeof p,"%s/%s",g_romfs_dir_override,rel); else snprintf(p,sizeof p,"%sromfs/%s",g_datadir,rel);
   FILE* f=fopen(p,"rb"); if(!f) return NULL; fseek(f,0,SEEK_END); long l=ftell(f); fseek(f,0,SEEK_SET);
   u8* d= l>0? malloc((size_t)l) : NULL; if(d && fread(d,1,(size_t)l,f)!=(size_t)l){ free(d); d=NULL; } fclose(f); *n=(size_t)l; return d; }
-static int skip_prompt_load(void){
+/* the font on the CPU, once: the atlas as linear BC3 blocks (2048x1024) and the ASCII glyph records. Shared by the
+   OpenGL prompt (uploaded as BC3) and the native Vulkan one (skip_prompt_rgba, composed here and blended by snxvk hdr.c) */
+static u8* g_sk_lin; static int g_sk_cpu;
+static int sk_font_cpu(void){
+  if(g_sk_cpu) return g_sk_cpu>0;
+  g_sk_cpu=-1;
   size_t fn=0, an=0; u8* fnt=sk_read("system/fonts/occ_32.bfont",&fn); u8* mt=sk_read("textures/system/fonts/textures/occ_atlas.bctex",&an);
-  u8 *xtx=NULL, *lin=NULL; int ok=0;
+  u8 *xtx=NULL, *lin=NULL;
   if(!fnt || !mt || fn<0x60+96*14 || memcmp(fnt,"MFNT",4) || an<16 || memcmp(mt,"MTXT",4)) goto out;
   memcpy(g_sk_gl,fnt+0x60,sizeof g_sk_gl);
   { void* z=plat_dl_open(
@@ -1369,6 +1374,41 @@ static int skip_prompt_load(void){
     for(size_t i=0;i+28<=got;i++) if(!memcmp(xtx+i,"HBvN",4)){ u64 ds,doff; u32 ty; memcpy(&ds,xtx+i+8,8); memcpy(&doff,xtx+i+16,8); memcpy(&ty,xtx+i+24,4);
         if(ty==3 && ds==2048u*1024u && i+doff+ds<=got){ lin=malloc(ds); if(!lin) goto out; deswizzle(lin,8192,xtx+i+doff,8192,256,4); break; } }
     if(!lin) goto out; }
+  g_sk_lin=lin; lin=NULL; g_sk_cpu=1; LOG("skip prompt: game font loaded\n");
+out:
+  if(g_sk_cpu<0) LOG("skip prompt: the game's font could not be loaded (romfs or zlib missing)\n");
+  free(fnt); free(mt); free(xtx); free(lin); return g_sk_cpu>0; }
+/* one BC3 texel of the atlas, RGBA8 */
+static void sk_texel(int x, int y, u8* o){
+  const u8* b=g_sk_lin+((size_t)(y>>2)*512+(size_t)(x>>2))*16; int i=(y&3)*4+(x&3);
+  int a0=b[0], a1=b[1]; u64 ab=0; for(int k=0;k<6;k++) ab|=(u64)b[2+k]<<(8*k); int ai=(int)((ab>>(3*i))&7); int a;
+  if(a0>a1) a= ai==0? a0 : ai==1? a1 : ((8-ai)*a0+(ai-1)*a1)/7; else a= ai==0? a0 : ai==1? a1 : ai==6? 0 : ai==7? 255 : ((6-ai)*a0+(ai-1)*a1)/5;
+  u16 c0=(u16)(b[8]|b[9]<<8), c1=(u16)(b[10]|b[11]<<8); u32 cb=(u32)b[12]|(u32)b[13]<<8|(u32)b[14]<<16|(u32)b[15]<<24; int ci=(int)((cb>>(2*i))&3);
+  int r0=(c0>>11)*255/31, g0=((c0>>5)&63)*255/63, b0=(c0&31)*255/31, r1=(c1>>11)*255/31, g1=((c1>>5)&63)*255/63, b1=(c1&31)*255/31;
+  int w0= ci==0? 3 : ci==1? 0 : ci==2? 2 : 1;   /* BC3 colour is always the 4-colour mode */
+  o[0]=(u8)((r0*w0+r1*(3-w0))/3); o[1]=(u8)((g0*w0+g1*(3-w0))/3); o[2]=(u8)((b0*w0+b1*(3-w0))/3); o[3]=(u8)a; }
+/* "Hold (-) to skip" at 1080p size as premultiplied RGBA (shadow included); *tw = the text's width (the hold bar's) */
+static void sk_blit(float* img, int W, int H, int sx, int sy, int w, int h, int dx, int dy, float tint, float alpha){
+  for(int y=0;y<h;y++) for(int x=0;x<w;x++){ int X=dx+x, Y=dy+y; if(X<0||Y<0||X>=W||Y>=H) continue;
+    u8 t[4]; sk_texel(sx+x,sy+y,t); float a=t[3]/255.0f*alpha; float* d=img+((size_t)Y*W+X)*4;
+    for(int k=0;k<3;k++) d[k]=t[k]/255.0f*tint*a+d[k]*(1-a); d[3]=a+d[3]*(1-a); } }
+static int sk_text_cpu(float* img, int W, int H, const char* s, int x, int y){
+  for(;*s;s++){ int c=(unsigned char)*s; if(c<32 || c>126) continue; const short* g=g_sk_gl[c-31];
+    if(img && g[2]>0 && g[3]>0){ int gx=x+g[4], gy=y+30-g[5]; sk_blit(img,W,H,g[0],g[1],g[2],g[3],gx+2,gy+2,0,0.6f); sk_blit(img,W,H,g[0],g[1],g[2],g[3],gx,gy,1,1); }
+    x+=g[6]; }
+  return x; }
+int skip_prompt_rgba(u8** px, int* w, int* h, int* tw){
+  if(!sk_font_cpu()) return 0;
+  enum { W=320, H=48 }; float* img=calloc((size_t)W*H*4,sizeof(float)); u8* out=malloc((size_t)W*H*4); if(!img || !out){ free(img); free(out); return 0; }
+  int x=sk_text_cpu(img,W,H,"Hold",2,4)+8;
+  sk_blit(img,W,H,725,144,32,32,x+2,4+2-1,0,0.6f); sk_blit(img,W,H,725,144,32,32,x,4-1,1,1);
+  x=sk_text_cpu(img,W,H,"to skip",x+32+8,4);
+  for(size_t i=0;i<(size_t)W*H*4;i++){ float v=img[i]*255.0f+0.5f; out[i]=(u8)(v>255? 255 : v<0? 0 : v); }
+  free(img); *px=out; *w=W; *h=H; *tw=x-2; return 1; }
+static int skip_prompt_load(void){
+  int ok=0; u8* lin=NULL;
+  if(!sk_font_cpu()) goto out;
+  lin=g_sk_lin;
   glGenTextures(1,&g_sk_tex); glBindTexture(GL_TEXTURE_2D,g_sk_tex);
   glTexStorage2D(GL_TEXTURE_2D,1,0x83F3,2048,1024); glCompressedTexSubImage2D(GL_TEXTURE_2D,0,0,0,2048,1024,0x83F3,2048*1024,lin);   /* COMPRESSED_RGBA_S3TC_DXT5 */
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
@@ -1380,10 +1420,9 @@ static int skip_prompt_load(void){
   if(!g_sk_prog) goto out;
   g_sk_u_rect=glGetUniformLocation(g_sk_prog,"rect"); g_sk_u_uv=glGetUniformLocation(g_sk_prog,"uvr");
   g_sk_u_col=glGetUniformLocation(g_sk_prog,"col"); g_sk_u_scr=glGetUniformLocation(g_sk_prog,"scr");
-  ok=1; LOG("skip prompt: game font loaded\n");
+  ok=1;
 out:
-  if(!ok) LOG("skip prompt: the game's font could not be loaded (romfs or zlib missing)\n");
-  free(fnt); free(mt); free(xtx); free(lin); return ok; }
+  (void)lin; return ok; }
 static void sk_quad(float x, float y, float w, float h, float u, float v, float uw, float vh, float r, float g, float b, float a){
   float q[3][4]={{x,y,w,h},{u,v,uw,vh},{r,g,b,a}}; glUniform4fv(g_sk_u_rect,1,q[0]); glUniform4fv(g_sk_u_uv,1,q[1]); glUniform4fv(g_sk_u_col,1,q[2]); glDrawArrays(GL_TRIANGLE_STRIP,0,4); }
 static float sk_text(const char* s, float x, float y, float k, float a, int draw){   /* y = baseline top of a 34 px line */

@@ -5,7 +5,10 @@
 //  - HDR (mode 1 scRGB, 2 HDR10 PQ): normal content at paper white, only the top of the range expanded smoothly toward
 //    the display's peak, keeping each pixel's hue (the RGB ratio); mode 0 = SDR as it was.
 // The image is read through a UNORM view: always the display-encoded bytes.
+// SWR: binding 1 = the "Hold (-) to skip" prompt (premultiplied, composed on the CPU by gpu_gl.c skip_prompt_rgba),
+// blended into the display-encoded picture before any HDR step, with its hold bar drawn here.
 layout(set = 0, binding = 0) uniform sampler2D img;
+layout(set = 0, binding = 1) uniform sampler2D ovl;
 layout(push_constant) uniform PC {
     float paper;    // nits for SDR white
     float peak;     // nits the brightest highlight reaches
@@ -13,6 +16,10 @@ layout(push_constant) uniform PC {
     float aa;       // 1: FXAA
     float out_srgb; // SDR to an sRGB swapchain: the hardware encodes, so hand it linear values
     float knee;     // where HDR expansion starts, in SDR linear (0..1)
+    float ox, oy, ow, oh; // prompt rectangle in swapchain pixels (top left origin)
+    float oa;             // prompt opacity, 0 = none
+    float hold;           // hold progress 0..1
+    float bx, by, bw, bh; // hold bar rectangle
 } pc;
 layout(location = 0) out vec4 o;
 
@@ -80,6 +87,15 @@ vec3 pq(vec3 nits) {
 void main() {
     vec2 uv = gl_FragCoord.xy / vec2(textureSize(img, 0));
     vec3 c = pc.aa > 0.5 ? fxaa(uv) : texelFetch(img, ivec2(gl_FragCoord.xy), 0).rgb;
+    if (pc.oa > 0.0) {
+        vec2 f = gl_FragCoord.xy;
+        if (f.x >= pc.ox && f.y >= pc.oy && f.x < pc.ox + pc.ow && f.y < pc.oy + pc.oh) {
+            vec4 v = texture(ovl, (f - vec2(pc.ox, pc.oy)) / vec2(pc.ow, pc.oh)) * pc.oa;
+            c = c * (1.0 - v.a) + v.rgb;
+        }
+        if (pc.hold > 0.0 && f.x >= pc.bx && f.y >= pc.by && f.x < pc.bx + pc.bw && f.y < pc.by + pc.bh)
+            c = f.x < pc.bx + pc.bw * pc.hold ? mix(c, vec3(1.0), pc.oa) : mix(c, vec3(0.0), 0.5 * pc.oa);
+    }
     if (pc.mode < 0.5) { // SDR
         o = vec4(pc.out_srgb > 0.5 ? srgb_to_linear(c) : c, 1.0);
         return;

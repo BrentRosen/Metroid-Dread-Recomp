@@ -18,8 +18,13 @@ extern int backend_hdr_peak_nits(void);                  /* the display's peak, 
 int vk_hdr_wanted(void) { return g_opt_hdr && g_vk_hdr_ext; }
 extern int g_opt_show_fps;                               /* FPS counter (main.c fps_overlay_rects) */
 extern int fps_overlay_rects(int W, int H, int (*r)[5], int max);
-/* the present pass runs for HDR output, anti-aliasing or the FPS counter (renderer.c show) */
-int vk_present_pass_wanted(void) { return g_vk_sc_hdr || g_opt_aa || g_opt_show_fps; }
+extern volatile int g_skip_prompt;   /* SWR: "Hold (-) to skip" (main.c skip_hold_filter) */
+extern volatile float g_skip_hold;
+extern u64 plat_ns(void);
+extern int skip_prompt_rgba(u8** px, int* w, int* h, int* tw);   /* gpu_gl.c: the prompt in the game's font */
+static float g_ovl_alpha;
+/* the present pass runs for HDR output, anti-aliasing, the FPS counter or the skip prompt (renderer.c show) */
+int vk_present_pass_wanted(void) { return g_vk_sc_hdr || g_opt_aa || g_opt_show_fps || g_skip_prompt || g_ovl_alpha > 0; }
 
 static VkImage g_mid;
 static VmaAllocation g_mid_mem;
@@ -33,24 +38,33 @@ static VkDescriptorSet g_set;
 static VkSampler g_samp;
 static VkPipeline g_pipe;
 static VkFormat g_pipe_fmt;
+static VkImage g_ovl; /* SWR: the skip prompt image (1x1 clear until the font is ready) */
+static VmaAllocation g_ovl_mem;
+static VkImageView g_ovl_view;
+static int g_ovl_w, g_ovl_h, g_ovl_tw, g_ovl_state; /* state: 0 none, 1 created, 2 uploaded */
+static u8* g_ovl_px;
 static VkImage g_sc_img[VK_SC_MAX];
 static VkImageView g_sc_view[VK_SC_MAX];
 
 static int layout_make(void) {
     if (g_layout) return 1;
-    VkDescriptorSetLayoutBinding b = {.binding = 0,
-                                      .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                      .descriptorCount = 1,
-                                      .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT};
+    VkDescriptorSetLayoutBinding b[2] = {{.binding = 0,
+                                          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                          .descriptorCount = 1,
+                                          .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT},
+                                         {.binding = 1, /* SWR: skip prompt */
+                                          .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                          .descriptorCount = 1,
+                                          .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT}};
     VkDescriptorSetLayoutCreateInfo dci = {
-        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 1, .pBindings = &b};
-    VkPushConstantRange pc = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 24};
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2, .pBindings = b};
+    VkPushConstantRange pc = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64};
     VkPipelineLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                       .setLayoutCount = 1,
                                       .pSetLayouts = &g_dsl,
                                       .pushConstantRangeCount = 1,
                                       .pPushConstantRanges = &pc};
-    VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
     VkDescriptorPoolCreateInfo pci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1, .poolSizeCount = 1, .pPoolSizes = &size};
     VkSamplerCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -185,13 +199,38 @@ VkImage vk_hdr_mid(int srgb) {
         g_mid = VK_NULL_HANDLE;
         return VK_NULL_HANDLE;
     }
-    VkDescriptorImageInfo di = {g_samp, g_mid_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                               .dstSet = g_set,
-                               .descriptorCount = 1,
-                               .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                               .pImageInfo = &di};
-    vkUpdateDescriptorSets(g_vk.dev, 1, &wr, 0, NULL);
+    if (!g_ovl) { /* SWR: the skip prompt, composed once on the CPU; uploaded by vk_hdr_resolve before its first use */
+        if (!skip_prompt_rgba(&g_ovl_px, &g_ovl_w, &g_ovl_h, &g_ovl_tw)) {
+            g_ovl_w = g_ovl_h = 1; g_ovl_tw = 0; g_ovl_px = calloc(1, 4);
+        }
+        VkImageCreateInfo oci = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                                 .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {(u32)g_ovl_w, (u32)g_ovl_h, 1},
+                                 .mipLevels = 1, .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT,
+                                 .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                 .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT};
+        VmaAllocationCreateInfo oai = {.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE};
+        if (g_ovl_px && VK_OK(vmaCreateImage(g_vk.vma, &oci, &oai, &g_ovl, &g_ovl_mem, NULL))) {
+            VkImageViewCreateInfo ovci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = g_ovl,
+                                          .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                          .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+            if (VK_OK(vkCreateImageView(g_vk.dev, &ovci, NULL, &g_ovl_view))) g_ovl_state = 1;
+        }
+    }
+    VkDescriptorImageInfo di[2] = {{g_samp, g_mid_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                                   {g_samp, g_ovl_view ? g_ovl_view : g_mid_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
+    VkWriteDescriptorSet wr[2] = {{.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                   .dstSet = g_set,
+                                   .dstBinding = 0,
+                                   .descriptorCount = 1,
+                                   .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                   .pImageInfo = &di[0]},
+                                  {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                   .dstSet = g_set,
+                                   .dstBinding = 1,
+                                   .descriptorCount = 1,
+                                   .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                   .pImageInfo = &di[1]}};
+    vkUpdateDescriptorSets(g_vk.dev, 2, wr, 0, NULL);
     g_mid_w = w;
     g_mid_h = h;
     g_mid_fmt = f;
@@ -221,7 +260,36 @@ void vk_hdr_resolve(VkCommandBuffer cb, VkImage sc) {
     int paper = g_opt_hdr_paper > 0 ? g_opt_hdr_paper : 200;
     struct {
         float paper, peak, mode, aa, out_srgb, knee;
+        float ox, oy, ow, oh, oa, hold, bx, by, bw, bh;
     } pc = {(float)paper, (float)peak, (float)g_vk_sc_hdr, g_opt_aa ? 1.0f : 0.0f, g_vk.sc_srgb ? 1.0f : 0.0f, 0.75f};
+    if (g_ovl_state == 1) { /* SWR: first use: the prompt image to the GPU, in this frame's commands */
+        VkBuffer sb; u64 so; u64 n = (u64)g_ovl_w * g_ovl_h * 4;
+        u8* dst = vk_stage(n, 16, &sb, &so);
+        if (dst) {
+            memcpy(dst, g_ovl_px, n);
+            vk_barrier(cb, g_ovl, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED,
+                       VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            VkBufferImageCopy cp = {.bufferOffset = so, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                    .imageExtent = {(u32)g_ovl_w, (u32)g_ovl_h, 1}};
+            rec_CmdCopyBufferToImage(cb, sb, g_ovl, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &cp);
+            vk_barrier(cb, g_ovl, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                       VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            g_ovl_state = 2;
+        }
+    }
+    { /* SWR: the prompt fades in and out like the OpenGL one (gpu_gl.c gpu_gl_skip_prompt) */
+        static u64 last; u64 now = plat_ns(); float dt = last ? (float)(now - last) / 1e9f : 0; last = now;
+        if (dt > 0.1f) dt = 0.1f;
+        float want = g_skip_prompt ? 1.0f : 0.0f, step = dt * 8.0f > 1 ? 1 : dt * 8.0f;
+        g_ovl_alpha += (want - g_ovl_alpha) * step; if (g_ovl_alpha < 0.01f && !g_skip_prompt) g_ovl_alpha = 0;
+        if (g_ovl_state == 2 && g_ovl_tw > 0 && g_ovl_alpha > 0) {
+            float k = (float)g_vk.sc_extent.height / 1080.0f; if (k < 0.5f) k = 0.5f;
+            float x = 48 * k, y = (g_opt_show_fps ? 96 : 44) * k;
+            pc.ox = x - 2 * k; pc.oy = y - 4 * k; pc.ow = g_ovl_w * k; pc.oh = g_ovl_h * k; pc.oa = g_ovl_alpha;
+            pc.hold = g_skip_hold; pc.bx = x; pc.by = y + 42 * k; pc.bw = g_ovl_tw * k; pc.bh = 4 * k;
+        }
+    }
     VkRenderingAttachmentInfo at = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                                     .imageView = view,
                                     .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
