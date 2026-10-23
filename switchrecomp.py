@@ -302,6 +302,7 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
     if not h264: cmd += ['-DSWR_NO_H264']
     if vp9: cmd += ['-DSWR_HAVE_VP9']
     if release: cmd += ['-DSWR_RELEASE']
+    if os.environ.get('SWR_RUNTIME_DEFS'): cmd += os.environ['SWR_RUNTIME_DEFS'].split()   # e.g. -DSWR_NO_SKIPCUT for a test build
     if snxvk: cmd += ['-DSWR_HAVE_SNXVK', snxvk]
     if frontend: cmd += ['-DSWR_HAVE_FRONTEND', '-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS', '-I', os.path.join(RT, 'imgui'), imgui]
     if overlay: cmd += ['-DSWR_HAVE_OVERLAY', '-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS', '-I', os.path.join(RT, 'imgui')]

@@ -104,6 +104,7 @@ void opt_row(const char* key) {
         float v = (float)atof(cur.c_str());
         std::string t = o->type == OPT_INT ? fmt("%d", (int)lroundf(v)) : fmt("%.2f", v);
         if (!strcmp(key, "resolution")) { bool d = val("docked") == "1"; std::string a = val("aspect"); t = res_text(v, d, a.c_str()); }
+        if (!strcmp(key, "mouse_sensitivity")) t = fmt("%d%%", (int)lroundf(v));
         if (!strcmp(key, "volume") || !strcmp(key, "rumble")) t = (int)v == 0 ? "Off" : fmt("%d%%", (int)lroundf(v));
         if (!strcmp(key, "stick_deadzone")) t = fmt("%d%%", (int)(v * 100 / 32767));
         if (row_slider(id.c_str(), o->label, &v, o->lo, o->hi, o->step, t.c_str(), tag)) commit(o->type == OPT_INT ? fmt("%d", (int)lroundf(v)) : fmt("%g", roundf(v * 100) / 100));
@@ -115,10 +116,15 @@ void tab_content(int t) {
     case 0: section("PICTURE"); opt_row("resolution"); opt_row("fullscreen"); opt_row("dynamic_resolution"); if (val("dynamic_resolution") == "1") opt_row("dynamic_resolution_min");
             opt_row("game_dynamic_resolution"); section("CONSOLE"); opt_row("docked"); opt_row("aspect"); opt_row("language"); break;
     case 1: section("QUALITY"); opt_row("antialiasing"); opt_row("shadows"); opt_row("anisotropy"); section("RENDERER"); opt_row("renderer"); opt_row("hdr"); break;
-    case 2: section("FRAME RATE"); opt_row("fps_limit"); opt_row("forced_vsync"); section("SCENES"); opt_row("cutscenes_60fps"); opt_row("loading_60fps");
+    case 2: section("FRAME RATE"); opt_row("fps_limit"); opt_row("forced_vsync"); opt_row("show_fps"); section("SCENES"); opt_row("cutscenes_60fps"); opt_row("loading_60fps");
+#ifndef SWR_NO_SKIPCUT
+        opt_row("skip_cutscenes");
+#endif
+       
             section("LOADING"); opt_row("fast_loading"); opt_row("fast_forward"); if (val("fast_forward") == "1") opt_row("fast_forward_speed"); break;
     case 3: section("OUTPUT"); opt_row("volume"); section("COMPATIBILITY"); opt_row("audio_eos_sample_count"); opt_row("audio_surround_downmix"); break;
-    case 4: section("CONTROLLER"); opt_row("button_icons"); opt_row("stick_deadzone"); opt_row("rumble"); opt_row("menu_shortcut"); opt_row("controller_api");
+    case 4: section("MOUSE"); opt_row("mouse_aim"); opt_row("mouse_sensitivity");
+            section("CONTROLLER"); opt_row("button_icons"); opt_row("stick_deadzone"); opt_row("rumble"); opt_row("menu_shortcut"); opt_row("controller_api");
             help_text("Button mapping and menu buttons are on the Play screen's Controls page."); break;
     default: {
         section("KEYS");

@@ -213,6 +213,7 @@ typedef struct Tex {
   u64 gva; u32 w, h, d, levels, target; u32 fkey; GlFmt f;
   u32 bl, bh, bd, pitch; u64 size;
   GLuint id; u64 hash; int is_rt, gpu_written; u32 frame_checked, last_used; GLint swz[4]; u64 tr_last; u32 stable, next_check; u64 video_gen; GLuint view; GLenum view_target; GLint vswz[4]; u32 wgen, crop_gen; struct Tex* crop; struct Tex* lay; struct Tex* vol; int skipclr, zero3d; u64 alias; u64 shash; u32 tfull;
+  GLuint pre; u32 pre_wgen, pre_w, pre_h; int pre_lv;   /* box-averaged copy for downsampling reads at a high resolution scale */
   struct Tex* next;
 } Tex;
 #define TEXH 4096
@@ -1323,6 +1324,95 @@ static int g_gs_ok;
 
 static void state_dirty(void){ g_state_ok=0; g_gs_ok=0; }
 void gpu_gl_state_dirty(void){ state_dirty(); }   /* the in-game menu drew with its own GL state (dread_ui/ov.cpp) */
+/* FPS counter (main.c fps_overlay_rects) onto the window's framebuffer, as scissored clears */
+void gpu_gl_fps_overlay(void){
+  extern int fps_overlay_rects(int,int,int(*)[5],int); int (*r)[5]; int buf[64][5]; r=buf; int w=1,h=1; backend_window_size(&w,&h);
+  int n=fps_overlay_rects(w,h,r,64); if(!n) return;
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER,0); glEnable(GL_SCISSOR_TEST); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+  for(int i=0;i<n;i++){ glScissor(r[i][0],h-r[i][1]-r[i][3],r[i][2],r[i][3]);
+    if(r[i][4]) glClearColor(1.0f,0.92f,0.2f,1.0f); else glClearColor(0.0f,0.0f,0.0f,1.0f);
+    glClear(GL_COLOR_BUFFER_BIT); }
+  glDisable(GL_SCISSOR_TEST); state_dirty(); }
+
+/* "Hold (-) to skip" in Metroid Dread's own font, top left, while main.c says a skippable cutscene plays.
+   The font is read from the game's romfs at first use: textures/system/fonts/textures/occ_atlas.bctex (MTXT: gzip of an
+   NVN XTX texture, BC3 2048x1024, block linear, block height 16 GOBs; uploaded as BC3 after deswizzling) and
+   system/fonts/occ_32.bfont (MFNT: 14-byte glyph records x, y, w, h, x offset, y offset, advance; glyph = ASCII - 31).
+   The round - button is in the same atlas at 725,144 32x32 (no glyph table entry). zlib is loaded at run time. */
+typedef struct { const u8* next_in; unsigned avail_in; unsigned long total_in; u8* next_out; unsigned avail_out; unsigned long total_out;
+  const char* msg; void* state; void* zalloc; void* zfree; void* opaque; int data_type; unsigned long adler; unsigned long reserved; } SkZ;
+static GLuint g_sk_tex, g_sk_prog; static int g_sk_state; static short g_sk_gl[96][7]; static GLint g_sk_u_rect, g_sk_u_uv, g_sk_u_col, g_sk_u_scr;
+static u8* sk_read(const char* rel, size_t* n){
+  extern char g_romfs_dir_override[1024]; char p[1400];
+  if(g_romfs_dir_override[0]) snprintf(p,sizeof p,"%s/%s",g_romfs_dir_override,rel); else snprintf(p,sizeof p,"%sromfs/%s",g_datadir,rel);
+  FILE* f=fopen(p,"rb"); if(!f) return NULL; fseek(f,0,SEEK_END); long l=ftell(f); fseek(f,0,SEEK_SET);
+  u8* d= l>0? malloc((size_t)l) : NULL; if(d && fread(d,1,(size_t)l,f)!=(size_t)l){ free(d); d=NULL; } fclose(f); *n=(size_t)l; return d; }
+static int skip_prompt_load(void){
+  size_t fn=0, an=0; u8* fnt=sk_read("system/fonts/occ_32.bfont",&fn); u8* mt=sk_read("textures/system/fonts/textures/occ_atlas.bctex",&an);
+  u8 *xtx=NULL, *lin=NULL; int ok=0;
+  if(!fnt || !mt || fn<0x60+96*14 || memcmp(fnt,"MFNT",4) || an<16 || memcmp(mt,"MTXT",4)) goto out;
+  memcpy(g_sk_gl,fnt+0x60,sizeof g_sk_gl);
+  { void* z=plat_dl_open(
+#ifdef _WIN32
+      "zlib1.dll"
+#else
+      "libz.so.1"
+#endif
+      ); if(!z) goto out;
+    int (*init)(SkZ*,int,const char*,int)=(int(*)(SkZ*,int,const char*,int))plat_dl_sym(z,"inflateInit2_");
+    int (*inf)(SkZ*,int)=(int(*)(SkZ*,int))plat_dl_sym(z,"inflate"); int (*end)(SkZ*)=(int(*)(SkZ*))plat_dl_sym(z,"inflateEnd");
+    if(!init || !inf || !end) goto out;
+    size_t cap=4u<<20; xtx=malloc(cap); SkZ s; memset(&s,0,sizeof s); s.next_in=mt+8; s.avail_in=(unsigned)(an-8); s.next_out=xtx; s.avail_out=(unsigned)cap;
+    if(!xtx || init(&s,31,"1.2.11",(int)sizeof s)!=0) goto out;
+    int r=inf(&s,4); size_t got=s.total_out; end(&s); if(r!=1) goto out;   /* Z_FINISH -> Z_STREAM_END */
+    /* the image block: NvBH type 3, data at its offset */
+    for(size_t i=0;i+28<=got;i++) if(!memcmp(xtx+i,"HBvN",4)){ u64 ds,doff; u32 ty; memcpy(&ds,xtx+i+8,8); memcpy(&doff,xtx+i+16,8); memcpy(&ty,xtx+i+24,4);
+        if(ty==3 && ds==2048u*1024u && i+doff+ds<=got){ lin=malloc(ds); if(!lin) goto out; deswizzle(lin,8192,xtx+i+doff,8192,256,4); break; } }
+    if(!lin) goto out; }
+  glGenTextures(1,&g_sk_tex); glBindTexture(GL_TEXTURE_2D,g_sk_tex);
+  glTexStorage2D(GL_TEXTURE_2D,1,0x83F3,2048,1024); glCompressedTexSubImage2D(GL_TEXTURE_2D,0,0,0,2048,1024,0x83F3,2048*1024,lin);   /* COMPRESSED_RGBA_S3TC_DXT5 */
+  glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+  { static const char* vs="#version 430 core\nuniform vec4 rect; uniform vec4 uvr; uniform vec4 scr; out vec2 uv;\n"
+      "void main(){ vec2 c=vec2(gl_VertexID&1,gl_VertexID>>1); uv=uvr.xy+c*uvr.zw; vec2 p=(rect.xy+c*rect.zw)/scr.xy; gl_Position=vec4(p.x*2.0-1.0,1.0-p.y*2.0,0.0,1.0); }";
+    static const char* fs="#version 430 core\nin vec2 uv; uniform sampler2D t; uniform vec4 col; out vec4 o;\n"
+      "void main(){ vec4 c= uv.x<0.0? vec4(1.0) : texture(t,uv); o=vec4(c.rgb*col.rgb,c.a*col.a); }";
+    GLuint a=compile(GL_VERTEX_SHADER,vs,NULL,0), b=compile(GL_FRAGMENT_SHADER,fs,NULL,0); g_sk_prog= a&&b? link2(a,b,0) : 0; }
+  if(!g_sk_prog) goto out;
+  g_sk_u_rect=glGetUniformLocation(g_sk_prog,"rect"); g_sk_u_uv=glGetUniformLocation(g_sk_prog,"uvr");
+  g_sk_u_col=glGetUniformLocation(g_sk_prog,"col"); g_sk_u_scr=glGetUniformLocation(g_sk_prog,"scr");
+  ok=1; LOG("skip prompt: game font loaded\n");
+out:
+  if(!ok) LOG("skip prompt: the game's font could not be loaded (romfs or zlib missing)\n");
+  free(fnt); free(mt); free(xtx); free(lin); return ok; }
+static void sk_quad(float x, float y, float w, float h, float u, float v, float uw, float vh, float r, float g, float b, float a){
+  float q[3][4]={{x,y,w,h},{u,v,uw,vh},{r,g,b,a}}; glUniform4fv(g_sk_u_rect,1,q[0]); glUniform4fv(g_sk_u_uv,1,q[1]); glUniform4fv(g_sk_u_col,1,q[2]); glDrawArrays(GL_TRIANGLE_STRIP,0,4); }
+static float sk_text(const char* s, float x, float y, float k, float a, int draw){   /* y = baseline top of a 34 px line */
+  for(;*s;s++){ int c=(unsigned char)*s; if(c<32 || c>126) continue; const short* g=g_sk_gl[c-31];
+    if(draw && g[2]>0 && g[3]>0){ float gx=x+g[4]*k, gy=y+(30-g[5])*k;
+      sk_quad(gx+2*k,gy+2*k,g[2]*k,g[3]*k,g[0]/2048.f,g[1]/1024.f,g[2]/2048.f,g[3]/1024.f,0,0,0,a*0.6f);
+      sk_quad(gx,gy,g[2]*k,g[3]*k,g[0]/2048.f,g[1]/1024.f,g[2]/2048.f,g[3]/1024.f,1,1,1,a); }
+    x+=g[6]*k; }
+  return x; }
+void gpu_gl_skip_prompt(void){
+  extern volatile int g_skip_prompt; extern volatile float g_skip_hold; extern int g_opt_show_fps;
+  static float alpha; static u64 last; u64 now=plat_ns(); float dt= last? (float)(now-last)/1e9f : 0; last=now; if(dt>0.1f) dt=0.1f;
+  float want= g_skip_prompt? 1.0f : 0.0f; alpha+= (want-alpha)*(dt*8.0f>1? 1 : dt*8.0f); if(alpha<0.01f && !want){ alpha=0; return; }
+  if(g_sk_state==0) g_sk_state= skip_prompt_load()? 1 : -1;
+  if(g_sk_state<0 || g_gles) return;
+  int w=1,h=1; backend_window_size(&w,&h); float k=(float)h/1080.0f; if(k<0.5f) k=0.5f;
+  float x=48*k, y=(g_opt_show_fps? 96 : 44)*k, ts=0.95f*k;
+  glBindFramebuffer(GL_FRAMEBUFFER,0); glViewport(0,0,w,h); glDisable(GL_SCISSOR_TEST); glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE);
+  glDisable(GL_STENCIL_TEST); glDisable(GL_FRAMEBUFFER_SRGB); glColorMaski(0,1,1,1,1);
+  glEnable(GL_BLEND); glBlendFuncSeparatei(0,GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA); glBlendEquationSeparatei(0,GL_FUNC_ADD,GL_FUNC_ADD);
+  glUseProgram(g_sk_prog); { float sc[4]={(float)w,(float)h,0,0}; glUniform4fv(g_sk_u_scr,1,sc); } glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,g_sk_tex); glBindSampler(0,0);
+  glUniform1i(glGetUniformLocation(g_sk_prog,"t"),0); glBindVertexArray(g_scratch_vao);
+  float ix=x, cx=sk_text("Hold",x,y,ts,alpha,1)+8*k, isz=34*k;
+  sk_quad(cx+2*k,y+2*k-1*k,isz,isz,725/2048.f,144/1024.f,32/2048.f,32/1024.f,0,0,0,alpha*0.6f);
+  sk_quad(cx,y-1*k,isz,isz,725/2048.f,144/1024.f,32/2048.f,32/1024.f,1,1,1,alpha);
+  float end=sk_text("to skip",cx+isz+8*k,y,ts,alpha,1);
+  { float hold=g_skip_hold; if(hold>0){ float bw=(end-ix)*hold;   /* hold progress under the text */
+      sk_quad(ix,y+42*k,end-ix,4*k,-1,0,0,0,0,0,0,alpha*0.5f); sk_quad(ix,y+42*k,bw,4*k,-1,0,0,0,1,1,1,alpha); } }
+  glDisable(GL_BLEND); glUseProgram(0); state_dirty(); }
 
 static void apply_state(GpuChannel* ch){
   u32* r=ch->r3d;
@@ -1589,6 +1679,38 @@ static GLuint null_tex(GLenum tg){
   mb_reset(); return *p; }
 
 static int getenv_cached_rtswz(void){ static int v=-1; if(v<0) v=getenv("SWR_OLD_RT_SWIZZLE")!=NULL; return v; }   /* 1 = old behaviour, ignore reorders on RTs */
+/* Resolution scale, downsampling and small-buffer passes: the game shrinks the scene for its bloom and glow with a few taps per
+   output pixel, placed for the guest resolution. At 4x those taps meet 1 rendered pixel in 16, so small bright things
+   (sparks, lamps) came out as dotted grids of glow and the lighting looked wrong (MEASURED 2026-10-22: light-res4 vs
+   res1/res2). A filtered read of a scaled render target by a draw at least 2x smaller (guest sizes) gets a copy of the
+   target box-averaged by 2^lv (a mip chain, read from level lv), so its taps see the averages they do at 1x. Only
+   scales of 2 and more; SWR_NO_RT_PREFILTER=1 turns it off */
+static u64 st_prefilter;
+static GLuint rt_prefiltered(Tex* t){
+  int lv=0; for(float k=2.0f; k<=g_scale+0.01f; k*=2.0f) lv++;
+  if(!lv) return 0;
+  u32 W=SC(t->w), H=SC(t->h);
+  if(!t->pre || t->pre_lv!=lv || t->pre_w!=W || t->pre_h!=H){
+    if(t->pre) glDeleteTextures(1,&t->pre);
+    glGenTextures(1,&t->pre); glBindTexture(GL_TEXTURE_2D,t->pre); glTexStorage2D(GL_TEXTURE_2D,lv+1,t->f.ifmt,W,H);
+    t->pre_lv=lv; t->pre_w=W; t->pre_h=H; t->pre_wgen=~0u; }
+  if(t->pre_wgen!=t->wgen){
+    glCopyImageSubData(t->id,GL_TEXTURE_2D,0,0,0,0,t->pre,GL_TEXTURE_2D,0,0,0,0,(GLsizei)W,(GLsizei)H,1);
+    glBindTexture(GL_TEXTURE_2D,t->pre); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_BASE_LEVEL,0); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAX_LEVEL,lv);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_BASE_LEVEL,lv);   /* every read lands on the averaged level */
+    t->pre_wgen=t->wgen; st_prefilter++; }
+  return t->pre; }
+static int downsample_read(const Tex* t, const ShTex* st){
+  static int off=-1; if(off<0) off=getenv("SWR_NO_RT_PREFILTER")!=NULL;
+  if(off || g_scale<1.99f || !t || !t->is_rt || t->target!=GL_TEXTURE_2D || t->f.depth || t->f.is_int || st->fetch_only || st->type!=1 || st->array || st->shadow) return 0;
+  const Tex* o=g_rt[0]; if(!o || o==t) return 0;
+  if(t->w>=2*o->w && t->h>=2*o->h) return 1;   /* shrinking it (the scene into the glow chain) */
+  /* a small buffer (the glow chain: 320x180 in Dread) blurred in place or spread over the screen: its taps are a
+     guest texel apart, which at 4x skipped 3 texels in 4 and left a grid every 20 pixels (MEASURED: light4-fix
+     profile). Glow is soft by nature, so the averaged copy loses nothing */
+  return t->w<=480 && t->h<=270; }
+
 static void bind_textures(GpuChannel* ch, int stage, Sh* s){
   u32* r=ch->r3d; u32 tcb=r[0x982];
   u64 tic_base=((u64)r[0x55D]<<32)|r[0x55E], tsc_base=((u64)r[0x557]<<32)|r[0x558];
@@ -1603,7 +1725,13 @@ static void bind_textures(GpuChannel* ch, int stage, Sh* s){
     /* the shader's sampler type wins */
     GLenum want= st->type==2? GL_TEXTURE_3D : st->type==3? (st->array? GL_TEXTURE_CUBE_MAP_ARRAY : GL_TEXTURE_CUBE_MAP) : st->array? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;
     tids[i]=0;
-    if(t && t->target==want && !(want==GL_TEXTURE_3D && t->zero3d && !t->is_rt)){ if(mb) tids[i]=t->id; else glBindTexture(want,t->id); if(t->is_rt) st_tex_rt++; else st_tex_ok++;
+    if(t && t->target==want && !(want==GL_TEXTURE_3D && t->zero3d && !t->is_rt)){ GLuint use=t->id;
+      if(want==GL_TEXTURE_2D && downsample_read(t,st)){ GLuint pf=rt_prefiltered(t); if(pf) use=pf; }
+      { static int dbg=-1; if(dbg<0) dbg=getenv("SWR_PREFILTER_DEBUG")!=NULL;
+        if(dbg && t->is_rt && g_rt[0] && g_rt[0]!=t && (t->w>g_rt[0]->w || t->h>g_rt[0]->h)){ static u64 seen[64]; static int ns; u64 k=((u64)t->w<<48)^((u64)t->h<<32)^((u64)g_rt[0]->w<<16)^g_rt[0]->h^((u64)st->fetch_only<<63)^((u64)stage<<60);
+          int f=0; for(int q=0;q<ns;q++) if(seen[q]==k) f=1;
+          if(!f && ns<64){ seen[ns++]=k; LOG("prefilter: stage %d reads rt %ux%u fmt %x into %ux%u: fetch_only %d type %d array %d shadow %d int %d -> %s\n",stage,t->w,t->h,t->f.ifmt,g_rt[0]->w,g_rt[0]->h,st->fetch_only,st->type,st->array,st->shadow,t->f.is_int,use!=t->id? "PREFILTERED" : "as is"); } } }
+      if(mb) tids[i]=use; else glBindTexture(want,use); if(t->is_rt) st_tex_rt++; else st_tex_ok++;
       if(want==GL_TEXTURE_3D){ static u64 seen3[16]; static int n3; int k=0; for(;k<n3;k++) if(seen3[k]==t->gva) break;
         if(k==n3 && n3<16){ seen3[n3++]=t->gva; LOG("gpu: 3D texture %ux%ux%u at %llx %s\n",t->w,t->h,t->d,(unsigned long long)t->gva,t->is_rt? "rendered by the GPU (3D render target)" : "read from memory (has data)"); } } }
     else if(want==GL_TEXTURE_3D){ /* 3D LUT with no data (its writer isn't emulated yet): hand out a neutral table instead of black */
@@ -2460,7 +2588,7 @@ static void present_cpu(u32* px, int w, int h){
 static u64 st_tex_evict, st_vb_evict;
 
 static void tex_free(Tex* t){
-  glDeleteTextures(1,&t->id); if(t->view) glDeleteTextures(1,&t->view);
+  glDeleteTextures(1,&t->id); if(t->view) glDeleteTextures(1,&t->view); if(t->pre) glDeleteTextures(1,&t->pre);
   if(t->crop){ glDeleteTextures(1,&t->crop->id); if(t->crop->view) glDeleteTextures(1,&t->crop->view); free(t->crop); }
   if(t->vol){ glDeleteTextures(1,&t->vol->id); if(t->vol->view) glDeleteTextures(1,&t->vol->view); free(t->vol); }
   if(t->lay){ glDeleteTextures(1,&t->lay->id); if(t->lay->view) glDeleteTextures(1,&t->lay->view); free(t->lay); }
@@ -2758,7 +2886,7 @@ static void res_dyn_step(void){
 static void frame_stats(void){
   u64 now=plat_ns(); if(!g_fr_t0){ g_fr_t0=now; memset(g_tm,0,sizeof g_tm); g_fr_shnew=st_sh_new; return; }
   u64 dt=now-g_fr_t0; g_fr_t0=now; if(dt>g_fr_max) g_fr_max=dt;
-  if(dt>120000000ull && g_rf && g_fr_slow<300){ g_fr_slow++; u32 pend=__atomic_load_n(&wq_hi.t,__ATOMIC_RELAXED)-__atomic_load_n(&wq_hi.h,__ATOMIC_RELAXED);
+  if(dt>50000000ull && g_rf && g_fr_slow<300){   /* 50 ms: low-end PCs should show their drops too */ g_fr_slow++; u32 pend=__atomic_load_n(&wq_hi.t,__ATOMIC_RELAXED)-__atomic_load_n(&wq_hi.h,__ATOMIC_RELAXED);
     fprintf(g_rf,"   slow frame %.0f ms (GPU thread: shaders %.0f+%.0f, state %.0f, textures %.0f, buffers %.0f, driver %.0f, present %.0f ms) new shaders %llu, queued %u\n",
       dt/1e6,g_tm[TM_SH]/1e6,g_tm[TM_SHREADY]/1e6,g_tm[TM_STATE]/1e6,g_tm[TM_TEX]/1e6,(g_tm[TM_BUF]+g_tm[TM_CB]+g_tm[TM_GB])/1e6,g_tm[TM_DRAW]/1e6,g_tm[TM_SWAP]/1e6,(unsigned long long)(st_sh_new-g_fr_shnew),pend); }
   rd_swap+=g_tm[TM_SWAP];

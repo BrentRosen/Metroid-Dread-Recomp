@@ -234,7 +234,7 @@ def source(out):
         '!runtime/vp9/win/libvpx.a', '!runtime/oh264/win/*.a', 'runtime/imgui/', 'redist/', 'cleanbuild_test/', 'runtime/snxvk/obj*/', '__pycache__/', 'release/', '*.log', 'shader_cache/', 'vulkan_native/', '']))
     # line endings exactly as written (some runtime files are CRLF by rule, the Linux scripts must stay LF)
     open(os.path.join(out, '.gitattributes'), 'w', newline='\n').write('* -text\n')
-    open(os.path.join(out, 'README.md'), 'w').write(SOURCE_README)
+    open(os.path.join(out, 'README.md'), 'w', encoding='utf-8').write(SOURCE_README)
     cp(os.path.join(ROOT, 'dread', 'DLSS.md'), os.path.join(out, 'DLSS.md'))
     n = sum(len(fn) for dp, dn, fn in os.walk(out))
     print('source: %s (%d files)' % (out, n))
@@ -292,6 +292,8 @@ them, not included here: Switch to XBOX Layout by Krydar, Switch to PS4 Layout b
 xSeRosiSx, with PlayStation art from Xelu's FREE Controller Prompts.
 
 Third-party work this builds on is credited below and on the game's Credits page.
+DISCLAIMER
+AI was used
 
 ## Licences
 

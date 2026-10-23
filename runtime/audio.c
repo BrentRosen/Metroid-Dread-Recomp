@@ -33,10 +33,23 @@ typedef struct {
   float filter[AC][2][4];
 } AVoice;
 typedef struct {u8 valid,used;u32 count,dest;float volume,matrix[24][24];} AMix;
+/* I3DL2 reverb (effect type 5). Dread runs one in place on buffers 6-11 of its 24-buffer submix with a dry gain of
+   0.25: without it that whole send bus played dry at 4x (+12 dB, ADAM's voice among it) and with no room sound.
+   Own implementation of the I3DL2 model: room/HF input gain, a pre-delay with early-reflection taps, two diffusion
+   all-passes and a 4-line feedback delay network with HF damping for the late reverb */
+#define RV_PRE 32768
+#define RV_LINE 4096
+#define RV_AP 1024
+typedef struct {
+  float pre[RV_PRE],line[4][RV_LINE],ap[2][RV_AP],lp[4],inlp;u32 pos;
+  u8 key[0x48];float room,hf,inlp_c,refl,rev,dry,diff,g[4],damp[4];u32 refl_d,rev_d,len[4],ap_len[2];
+} AReverb;
+typedef struct {u8 type,enabled,is_new;u32 mix;u8 param[0xA0];AReverb*rv;} AEffect;
+#define AE 32
 typedef struct {
   AVoice *voices;AMix mix[AM];u8 resources[AR][0x70];u8 resource_valid[AR];
   float *samples;u8 sink_inputs[AC];u32 sink_count;u64 ticks;int logged_voice,logged_routes;
-  float downmix[4];
+  float downmix[4];AEffect effect[AE];u32 effect_count;
 } ARenderer;
 static void atrace_voice(const char*event,u32 id,AVoice*v,const u8*vi,const u8*wb){
   static int checked;static FILE*f;if(!checked){checked=1;const char*p=getenv("SWR_AUDIO_VOICE_CSV");if(p&&*p){f=fopen(p,"w");if(f)fprintf(f,"ns,event,id,played,consumed,queued,state,rate,format,address,bytes,start,end,loop,eos,context,context_bytes,first16\n");}}
@@ -156,6 +169,9 @@ static void acapture(const i16*pcm){
 static void aroutes(ARenderer*r,const u32*ih,const u8*input,u64 size){
   u64 off=64ull+ih[1]+ih[2];if(off+ih[4]>size)return;
   for(u32 i=0;i<ih[4]/0x70;i++){const u8*p=input+off+i*0x70;u32 id=au32(p);if(id<AR){memcpy(r->resources[id],p,0x70);r->resource_valid[id]=1;}}
+  {u64 eo=off+ih[4]+(u64)ih[3];u32 n=ih[5]/0xC0;if(n>AE)n=AE;if(eo+(u64)n*0xC0<=size){r->effect_count=n;
+    for(u32 i=0;i<n;i++){const u8*e=input+eo+i*0xC0;AEffect*f=&r->effect[i];if(f->type!=e[0]||e[1]){if(f->rv)memset(f->rv,0,sizeof *f->rv);}
+      f->type=e[0];f->is_new=e[1];f->enabled=e[2];f->mix=au32(e+4);memcpy(f->param,e+0x20,0xA0);}}}
   off+=ih[4]+(u64)ih[3]+ih[5]+ih[9];if(off+ih[6]>size)return;
   u32 count=ih[6]/0x930;const u8*p=input+off;
   if(ih[6]>=0x20&&(ih[6]-0x20)%0x930==0){count=au32(p+4);if(count>(ih[6]-0x20)/0x930)return;p+=0x20;}
@@ -180,10 +196,92 @@ static float astereo_sample(const ARenderer*r,int n,int ch,float volume){
   if(source>=24)source=ch;
   return r->samples[(size_t)source*AF+n]*volume;
 }
+static float amb(float mb){return powf(10.f,mb/2000.f);}   /* millibels to linear gain */
+static void areverb_setup(AReverb*v,const u8*q){
+  if(!memcmp(v->key,q,0x48))return;memcpy(v->key,q,0x48);
+  const float fs=48000.f;float room_hf=af32(q+0x18),ref_hf=af32(q+0x1C),decay=af32(q+0x20),hf_ratio=af32(q+0x24);
+  float refl_delay=af32(q+0x38),rev_delay=af32(q+0x3C),diffusion=af32(q+0x34),density=af32(q+0x40);
+  if(!(ref_hf>20.f&&ref_hf<20000.f))ref_hf=5000.f;if(!(decay>=0.1f&&decay<=20.f))decay=decay<0.1f?0.1f:20.f;
+  if(!(hf_ratio>=0.1f&&hf_ratio<=2.f))hf_ratio=hf_ratio<0.1f?0.1f:2.f;
+  if(!(refl_delay>=0&&refl_delay<=0.3f))refl_delay=refl_delay<0?0:0.3f;if(!(rev_delay>=0&&rev_delay<=0.1f))rev_delay=rev_delay<0?0:0.1f;
+  if(!(diffusion>=0&&diffusion<=100.f))diffusion=100.f;if(!(density>=0&&density<=100.f))density=100.f;
+  v->room=amb(af32(q+0x28));v->hf=amb(room_hf);if(v->hf>1)v->hf=1;v->refl=amb(af32(q+0x2C));v->rev=amb(af32(q+0x30));
+  v->dry=af32(q+0x44);if(!(v->dry>=0&&v->dry<=1))v->dry=v->dry>1?1:0;
+  float w=2.f*3.14159265f*ref_hf/fs;v->inlp_c=1.f-expf(-w);   /* one-pole split at the reference frequency */
+  v->refl_d=(u32)(refl_delay*fs);v->rev_d=v->refl_d+(u32)(rev_delay*fs);
+  static const u32 base[4]={1433,1601,1867,2053};float scale=0.6f+0.4f*density/100.f;
+  for(int k=0;k<4;k++){v->len[k]=(u32)(base[k]*scale);
+    float t=(float)v->len[k]/fs;v->g[k]=powf(10.f,-3.f*t/decay);
+    /* HF damping: a one-pole low-pass whose gain at the reference frequency gives the HF decay time decay*hf_ratio */
+    float ghf=powf(10.f,-3.f*t/(decay*(hf_ratio<1.f?hf_ratio:1.f))),want=ghf/v->g[k],a=0;
+    if(want<0.999f){float lo=0,hi=0.999f;for(int it=0;it<40;it++){float m=(lo+hi)*0.5f,mag=(1-m)/sqrtf(1-2*m*cosf(w)+m*m);if(mag>want)lo=m;else hi=m;}a=(lo+hi)*0.5f;}
+    v->damp[k]=a;}
+  v->diff=0.6f*diffusion/100.f;v->ap_len[0]=(u32)(142*scale)+1;v->ap_len[1]=(u32)(379*scale)+1;
+}
+static void areverb(AReverb*v,float*const*io,int nch,int lfe){
+  static const u32 taps[4]={0,211,523,877};static const float tapg[4]={0.5f,0.4f,0.3f,0.25f};
+  for(int n=0;n<AF;n++){float x=0;int used=0;for(int c=0;c<nch;c++)if(io[c]&&c!=lfe){x+=io[c][n];used++;}if(used)x/=(float)used;
+    v->inlp+=(x-v->inlp)*v->inlp_c;x=(v->inlp+(x-v->inlp)*v->hf)*v->room;
+    u32 p=v->pos;v->pre[p&(RV_PRE-1)]=x;
+    float early=0;for(int t=0;t<4;t++)early+=v->pre[(p-v->refl_d-taps[t])&(RV_PRE-1)]*tapg[t];early*=v->refl;
+    float u=v->pre[(p-v->rev_d)&(RV_PRE-1)];
+    for(int a=0;a<2;a++){float d=v->ap[a][(p-v->ap_len[a])&(RV_AP-1)],y=d-v->diff*u;v->ap[a][p&(RV_AP-1)]=u+v->diff*y;u=y;}
+    float o[4],sum=0;for(int k=0;k<4;k++){o[k]=v->line[k][(p-v->len[k])&(RV_LINE-1)];v->lp[k]=o[k]+(v->lp[k]-o[k])*v->damp[k];o[k]=v->lp[k];sum+=o[k];}
+    for(int k=0;k<4;k++){float f=(o[k]-0.5f*sum)*v->g[k]+u;if(!isfinite(f))f=0;v->line[k][p&(RV_LINE-1)]=f;}   /* Householder feedback */
+    float late=v->rev*0.5f,wl=early+(o[0]+o[2])*late,wr=early+(o[1]+o[3])*late;v->pos=p+1;
+    float wet[6]={wl,wr,0.5f*(wl+wr),0,early+(o[0]-o[3])*late,early+(o[1]-o[2])*late};
+    if(nch==1)wet[0]=0.5f*(wl+wr);
+    for(int c=0;c<nch;c++)if(io[c])io[c][n]=io[c][n]*v->dry+(c==lfe?0:wet[c<6?c:0]);}
+}
+/* effects of one mix, run after its voices and child mixes are summed and before it is routed on. Only I3DL2 reverb
+   is modelled; a disabled in-place effect is a bypass, as on the console */
+static void aeffects_run(ARenderer*r,u32 mix){
+  for(u32 i=0;i<r->effect_count;i++){AEffect*f=&r->effect[i];if(f->mix!=mix||!f->enabled)continue;
+    if(f->type==5){const u8*q=f->param;int nch=au32(q+0xE)&0xFFFF;if(nch<1||nch>6)continue;
+      if(!f->rv){f->rv=calloc(1,sizeof *f->rv);if(!f->rv)continue;}
+      areverb_setup(f->rv,q);float*io[6]={0};
+      for(int c=0;c<nch;c++){int in=(signed char)q[c],out=(signed char)q[6+c];if(in<0||in>=24||out<0||out>=24)continue;
+        float*src=r->samples+((size_t)mix*24+in)*AF,*dst=r->samples+((size_t)mix*24+out)*AF;if(dst!=src)memcpy(dst,src,AF*sizeof(float));io[c]=dst;}
+      areverb(f->rv,io,nch,nch==6?3:-1);}
+    else{static u32 warned;if(f->type<32&&!(warned&(1u<<f->type))){warned|=1u<<f->type;LOG("audio: effect type %u is not modelled (mix %u)\n",f->type,mix);}}}
+}
+static void agroups(ARenderer*r,double*e){for(int g=0;g<4;g++)for(int c=0;c<6;c++){const float*x=r->samples+((size_t)24+g*6+c)*AF;for(int n=0;n<AF;n++)e[g]+=(double)x[n]*x[n];}}
+static void aeffects(ARenderer*r,u32 mix){
+  static int on=-1;static double e[2][4];static u32 ticks;if(on<0)on=getenv("SWR_AUDIO_GROUP_TRACE")!=NULL;   /* RMS per 6-buffer group of submix 1, before/after its effects */
+  if(!on||mix!=1){aeffects_run(r,mix);return;}
+  agroups(r,e[0]);aeffects_run(r,mix);agroups(r,e[1]);
+  if(++ticks%200==0){LOG("audio groups: before %.4f %.4f %.4f %.4f  after %.4f %.4f %.4f %.4f\n",sqrt(e[0][0]/48000),sqrt(e[0][1]/48000),sqrt(e[0][2]/48000),sqrt(e[0][3]/48000),sqrt(e[1][0]/48000),sqrt(e[1][1]/48000),sqrt(e[1][2]/48000),sqrt(e[1][3]/48000));memset(e,0,sizeof e);}
+}
+/* SWR_AUDIO_ROUTE_TRACE=1: once a second, when it changed, log the effects, splitters, mixes and which mix/splitter
+   the playing voices use (what the mixer below does and does not model) */
+static void aroute_trace(ARenderer*r,const u32*ih,const u8*input,u64 size,const u8*voices,u32 count){
+  static int on=-1;static u64 last;if(on<0)on=getenv("SWR_AUDIO_ROUTE_TRACE")!=NULL;if(!on||r->ticks%200)return;
+  u64 off=64ull+ih[1]+ih[2]+ih[4]+ih[3];if(off+ih[5]+ih[9]>size)return;
+  char line[4096];int n=0;u64 sig=1469598103934665603ull;
+#define AT_ADD(...) do{int k_=snprintf(line+n,sizeof line-n,__VA_ARGS__);if(k_>0&&n+k_<(int)sizeof line)n+=k_;}while(0)
+  for(u32 i=0;i<ih[5]/0xC0;i++){const u8*e=input+off+i*0xC0;if(!e[0])continue;AT_ADD(" E%u:t%u en%u mix%u",i,e[0],e[2],au32(e+4));
+    if(e[0]==1){u32 c=au32(e+0x20+48+96);if(c>24)c=24;AT_ADD("[");for(u32 k=0;k<c;k++)AT_ADD("%d>%d*%.2f ",(signed char)e[0x20+k],(signed char)e[0x20+24+k],af32(e+0x20+48+k*4));AT_ADD("]");}
+    if(e[0]==5){const u8*q=e+0x20;AT_ADD("[in");for(int k=0;k<6;k++)AT_ADD(" %d",(signed char)q[k]);AT_ADD(" out");for(int k=0;k<6;k++)AT_ADD(" %d",(signed char)q[6+k]);
+      AT_ADD(" ch%u room%.0f refl%.0f rev%.0f dry%.2f st%u]",au32(q+0xE)&0xFFFF,af32(q+0x28),af32(q+0x2C),af32(q+0x30),af32(q+0x44),q[0x48]);}
+    if(e[0]==2){u32 c=au32(e+0x20+48);if(c>24)c=24;AT_ADD("[");for(u32 k=0;k<c;k++)AT_ADD("%d>%d ",(signed char)e[0x20+k],(signed char)e[0x20+24+k]);AT_ADD("]");}}
+  off+=ih[5];
+  if(ih[9]>=0x20){const u8*h=input+off;AT_ADD(" | split %.4s info %u data %u",(const char*)h,au32(h+4),au32(h+8));}
+  AT_ADD(" | mixes");for(u32 id=0;id<AM;id++){AMix*m=&r->mix[id];if(!m->valid||!m->used)continue;AT_ADD(" M%u>%d v%.2f c%u",id,(int)m->dest,m->volume,m->count);
+    if(id){AT_ADD("{");for(u32 a=0;a<m->count;a++)for(u32 b=0;b<24;b++)if(m->matrix[a][b])AT_ADD("%u>%u:%.2f ",a,b,m->matrix[a][b]);AT_ADD("}");}}
+  u32 hist[8][3];int nh=0;
+  for(u32 i=0;i<count;i++){const u8*vi=voices+i*0x170;if(!vi[9]||vi[0xA]!=0)continue;u32 mix=au32(vi+0x58),sp=au32(vi+0x5C);int f=-1;
+    for(int k=0;k<nh;k++)if(hist[k][0]==mix&&hist[k][1]==sp)f=k;if(f<0&&nh<8){f=nh++;hist[f][0]=mix;hist[f][1]=sp;hist[f][2]=0;}if(f>=0)hist[f][2]++;}
+  for(u32 i=0;i<count;i++){const u8*vi=voices+i*0x170;if(!vi[9]||vi[0xA]!=0)continue;for(int w=0;w<4;w++){const u8*wb=vi+0x60+w*0x38;
+    if(au64(wb)&&wb[0x18])AT_ADD(" L%u:%d,%d cnt%d ls%u le%u",au32(vi)&(AV-1),ai32(wb+0x10),ai32(wb+0x14),ai32(wb+0x1C),au32(wb+0x30),au32(wb+0x34));}}
+  AT_ADD(" | voices");for(int k=0;k<nh;k++)AT_ADD(" mix%d/split%d x%u",(int)hist[k][0],(int)hist[k][1],hist[k][2]);
+#undef AT_ADD
+  for(int k=0;k<n;k++)sig=(sig^(u8)line[k])*1099511628211ull;
+  if(sig!=last){last=sig;LOG("audio route:%s\n",line);}
+}
 extern int g_opt_audio_eos_sample_count;
 void audio_render(SvcObj*o,const u32*ih,const u8*input,u64 size,const u8*voices,u32 count,u8*status){
   if(!o->u[4]){ARenderer*r=calloc(1,sizeof *r);if(!r)return;r->voices=calloc(AV,sizeof(AVoice));r->samples=calloc(AM*24*AF,sizeof(float));if(!r->voices||!r->samples){free(r->voices);free(r->samples);free(r);return;}o->u[4]=(u64)(size_t)r;}
-  ARenderer*r=(ARenderer*)(size_t)o->u[4];aroutes(r,ih,input,size);memset(r->samples,0,AM*24*AF*sizeof(float));u32 active=0;
+  ARenderer*r=(ARenderer*)(size_t)o->u[4];aroutes(r,ih,input,size);aroute_trace(r,ih,input,size,voices,count);memset(r->samples,0,AM*24*AF*sizeof(float));u32 active=0;
   for(u32 i=0;i<count;i++){const u8*vi=voices+i*0x170;u32 id=au32(vi)&(AV-1);AVoice*v=&r->voices[id];u8 in_use=vi[9],play=vi[0xA];
     if(vi[8]){atrace_voice("new",id,v,vi,NULL);aclear(v,1);memset(v,0,sizeof *v);}
     if(!in_use){if(v->nq){atrace_voice("unused",id,v,vi,NULL);aclear(v,1);}v->was_playing=0;}
@@ -217,9 +315,10 @@ void audio_render(SvcObj*o,const u32*ih,const u8*input,u64 size,const u8*voices,
   /* Route leaves towards the final mix in dependency order. Cycles and
      invalid destinations are ignored instead of recursively feeding audio. */
   u8 done[AM]={0};done[0]=1;
-  for(int pass=0;pass<AM;pass++){int progressed=0;for(u32 id=1;id<AM;id++){AMix*m=&r->mix[id];if(done[id]||!m->valid||!m->used)continue;int child=0;for(u32 k=1;k<AM;k++)if(!done[k]&&r->mix[k].valid&&r->mix[k].used&&r->mix[k].dest==id){child=1;break;}if(child)continue;done[id]=1;progressed=1;u32 dest=m->dest;if(dest>=AM||dest==id)continue;u32 dc=r->mix[dest].valid?r->mix[dest].count:2;
+  for(int pass=0;pass<AM;pass++){int progressed=0;for(u32 id=1;id<AM;id++){AMix*m=&r->mix[id];if(done[id]||!m->valid||!m->used)continue;int child=0;for(u32 k=1;k<AM;k++)if(!done[k]&&r->mix[k].valid&&r->mix[k].used&&r->mix[k].dest==id){child=1;break;}if(child)continue;done[id]=1;progressed=1;aeffects(r,id);u32 dest=m->dest;if(dest>=AM||dest==id)continue;u32 dc=r->mix[dest].valid?r->mix[dest].count:2;
     for(u32 src=0;src<m->count;src++)for(u32 d=0;d<dc;d++){float gain=m->matrix[src][d]*m->volume;if(!isfinite(gain)||!gain)continue;float*s=r->samples+((size_t)id*24+src)*AF,*out=r->samples+((size_t)dest*24+d)*AF;for(int n=0;n<AF;n++)out[n]+=s[n]*gain;}}
     if(!progressed)break;}
+  aeffects(r,0);
   if(o->u[3]==0){i16 pcm[AF*2];extern int g_opt_volume;float final_volume=(r->mix[0].valid?r->mix[0].volume:1)*(float)g_opt_volume*0.01f;   /* [Audio] volume, live */float peak=0;
     {static int checked;static FILE*csv;if(!checked){checked=1;const char*e=getenv("SWR_AUDIO_MIX_CSV");if(e&&*e){csv=fopen(e,"w");if(csv)fprintf(csv,"ns,tick,active,sink_count,input,source,rms,peak\n");}}
       if(csv&&r->ticks%40==0){for(u32 ch=0;ch<r->sink_count;ch++){u32 source=r->sink_inputs[ch];if(source>=24)continue;double sum=0;float peak=0;for(int n=0;n<AF;n++){float value=r->samples[(size_t)source*AF+n]*final_volume;sum+=(double)value*value;if(fabsf(value)>peak)peak=fabsf(value);}fprintf(csv,"%llu,%llu,%u,%u,%u,%u,%.8f,%.8f\n",(unsigned long long)plat_ns(),(unsigned long long)r->ticks,active,r->sink_count,ch,source,sqrt(sum/AF),peak);}fflush(csv);}}

@@ -5,6 +5,8 @@
    F1 menu  F3 screenshot  F4 fps limit  F11 fullscreen  Esc quit
    The same window first shows the Play screen / setup (dread_ui/fe.cpp, Direct3D 11, no pixel format), then the game. */
 #include "rt.h"
+#include <math.h>
+#include <ctype.h>
 #include "pad_remap.h"
 #include <windows.h>
 #include <mmsystem.h>  /* timeBeginPeriod (windows.h leaves it out with WIN32_LEAN_AND_MEAN) */
@@ -18,7 +20,10 @@ static char g_script[8192];
 static HANDLE g_ready;
 static volatile int g_fe_mode;   /* the front end owns the window (its messages go to fe_wndproc) */
 static HANDLE g_fe_done, g_video_go; static int g_fe_result, g_win_started;
-static HWND g_fe_hwnd;   /* the front end's window, retired at Play (its messages go to DefWindowProc) */
+static HWND g_fe_hwnd;
+/* mouse free aim: raw movement since the last poll (WM_INPUT, any thread adds, the input thread takes), and the buttons
+   held (1 left, 2 right, 4 middle, 8 back, 16 forward) */
+static volatile LONG g_mdx, g_mdy, g_mbtn;   /* the front end's window, retired at Play (its messages go to DefWindowProc) */
 #define PAD_HOME (1ull<<30)   /* Home / Guide / PS: physical only, opens the in-game menu, never reaches the game */
 extern int g_opt_fps;
 
@@ -254,12 +259,28 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l){
     if(w==VK_F4){ if(l & (1L<<30)) return 0; g_opt_fps= g_opt_fps==0? 1 : 0; char t[64]; snprintf(t,sizeof t,"FPS limit: %s",g_opt_fps==0? "unlimited" : "60"); SetWindowTextA(h,t); LOG("settings: F4 fps_limit=%d\n",g_opt_fps); { extern void ini_set(const char*, const char*); char v[8]; snprintf(v,sizeof v,"%d",g_opt_fps); ini_set("fps_limit",v); } return 0; }
     keys_held|=keymap(w);if(test_tap_sample)keys_tapped|=keymap(w); return 0;
   case WM_SYSKEYUP: case WM_KEYUP: keys_held&=~keymap(w); return 0;
-  case WM_KILLFOCUS: keys_held=0;keys_tapped=0; return 0;
+  case WM_KILLFOCUS: keys_held=0;keys_tapped=0; InterlockedExchange(&g_mbtn,0); ClipCursor(NULL); ReleaseCapture(); return 0;
   case WM_APP+8: { char t[300]; if(w) snprintf(t,sizeof t,"%s  |  RECORDING (F7 to stop)",g_title); else snprintf(t,sizeof t,"%s  |  Video saved in the recordings folder",g_title); SetWindowTextA(h,t); return 0; }
   case WM_APP+10: { char t[400]; char* s=(char*)l; if(s){ snprintf(t,sizeof t,"%s  |  %s",g_title,s); free(s); } else snprintf(t,sizeof t,"%s",g_title); SetWindowTextA(h,t); return 0; }   /* backend_status_win */
   case WM_APP+9: { char t[160]; if(w) snprintf(t,sizeof t,"%s  |  FAST FORWARD x%d (Tab or L3+R3)",g_title,(int)l); else snprintf(t,sizeof t,"%s",g_title); SetWindowTextA(h,t); return 0; }
   case WM_APP+7: { char t[160]; if(w) snprintf(t,sizeof t,"%s  |  LSFG ON x%d (frame generation)",g_title,(int)l); else snprintf(t,sizeof t,"%s  |  LSFG standby",g_title); SetWindowTextA(h,t); return 0; }
+  case WM_INPUT: { RAWINPUT ri; UINT sz=sizeof ri;
+      if(GetRawInputData((HRAWINPUT)l,RID_INPUT,&ri,&sz,sizeof(RAWINPUTHEADER))!=(UINT)-1 && ri.header.dwType==RIM_TYPEMOUSE &&
+         !(ri.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)){ InterlockedExchangeAdd(&g_mdx,ri.data.mouse.lLastX); InterlockedExchangeAdd(&g_mdy,ri.data.mouse.lLastY); }
+      break; }   /* DefWindowProc cleans up after the read */
+  case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN: case WM_XBUTTONDOWN:
+  case WM_LBUTTONUP: case WM_RBUTTONUP: case WM_MBUTTONUP: case WM_XBUTTONUP: {
+      LONG bit= (m==WM_LBUTTONDOWN||m==WM_LBUTTONUP)? 1 : (m==WM_RBUTTONDOWN||m==WM_RBUTTONUP)? 2 : (m==WM_MBUTTONDOWN||m==WM_MBUTTONUP)? 4
+              : (HIWORD(w)==XBUTTON1? 8 : 16);
+      int down= m==WM_LBUTTONDOWN||m==WM_RBUTTONDOWN||m==WM_MBUTTONDOWN||m==WM_XBUTTONDOWN;
+      LONG now= down? (g_mbtn|bit) : (g_mbtn&~bit); InterlockedExchange(&g_mbtn,now);
+      extern int mouse_aim_button(void);
+      if(now && GetCapture()!=h) SetCapture(h); else if(!now) ReleaseCapture();   /* releases still arrive outside the window */
+      if(down && (bit&mouse_aim_button())){ RECT c; GetClientRect(h,&c); MapWindowPoints(h,NULL,(POINT*)&c,2); ClipCursor(&c); }   /* aiming: the cursor stays in */
+      else if(!down && (bit&mouse_aim_button())) ClipCursor(NULL);
+      return (m==WM_XBUTTONDOWN||m==WM_XBUTTONUP)? TRUE : 0; }
   case WM_SETCURSOR: if(LOWORD(l)==HTCLIENT && ov_is_open()){ SetCursor(LoadCursor(NULL,IDC_ARROW)); return TRUE; }
+    { extern int g_opt_mouse_aim; if(g_opt_mouse_aim && LOWORD(l)==HTCLIENT){ SetCursor(NULL); return TRUE; } }   /* free aim: no cursor over the game */
     if(g_fullscreen && LOWORD(l)==HTCLIENT){ SetCursor(NULL); return TRUE; } break;
   }
   return DefWindowProcA(h,m,w,l);
@@ -312,6 +333,7 @@ static void win_thread(void* arg){
   { extern int g_snxvk_want; if(!g_snxvk_want) set_pixel_format(g_hdc); }   /* native Vulkan: no GL pixel format on its window (set later if it falls back) */
   if(g_want_fs) set_fullscreen(1);
   ShowWindow(g_hwnd,SW_SHOW);
+  { RAWINPUTDEVICE d={1,2,0,g_hwnd}; if(!RegisterRawInputDevices(&d,1,sizeof d)) LOG("input: raw mouse input unavailable: no mouse free aim\n"); }   /* generic desktop mouse */
   ls_launch();
   SetEvent(g_ready);
   MSG msg; while(GetMessageA(&msg,NULL,0,0)>0){ TranslateMessage(&msg); DispatchMessageA(&msg); }
@@ -443,6 +465,47 @@ static void test_input_apply(u64*b,i32*lx,i32*ly,i32*rx,i32*ry){
   }
 }
 
+/* Mouse free aim. Dread aims freely while L is held, in the left stick's direction: while the mouse button set to l
+   (right by default) is held, the mouse moves a virtual stick, which turns the aim. It starts centred (the arm points
+   ahead), the mouse pushes it, and it stays where it was pushed (a stick needs no holding): ~150 counts at 100%
+   sensitivity swing it from centre to the edge. The other mouse buttons press their Switch buttons */
+static int g_mb_bit[5]={-2,-2,-2,-2,-2};   /* -2 not parsed yet, -1 none */
+void mouse_map_reset(void){ g_mb_bit[0]=-2; }
+static void mouse_map(void){
+  if(g_mb_bit[0]!=-2) return;
+  extern char g_opt_mouse_buttons[]; static const struct { const char* n; int bit; } N[]={{"a",0},{"b",1},{"x",2},{"y",3},
+    {"lstick",4},{"rstick",5},{"l",6},{"r",7},{"zl",8},{"zr",9},{"plus",10},{"minus",11}};
+  const char* p=g_opt_mouse_buttons;
+  for(int i=0;i<5;i++){ char t[16]; int k=0; while(*p==' ') p++; while(*p && *p!=',' && k<15) t[k++]=(char)tolower((unsigned char)*p++); t[k]=0; if(*p==',') p++;
+    g_mb_bit[i]=-1; for(size_t j=0;j<sizeof N/sizeof *N;j++) if(!strcmp(t,N[j].n)) g_mb_bit[i]=N[j].bit; } }
+int mouse_aim_button(void){ mouse_map(); int m=0; for(int i=0;i<5;i++) if(g_mb_bit[i]==6) m|=1<<i; return m; }   /* the mouse buttons set to L */
+/* test only: SWR_TEST_MOUSE="FRAME:DX,DY,BUTTONS;..." adds that movement at that guest frame and holds those buttons
+   (hex, 1 left 2 right 4 middle) from there to the next entry */
+static void mouse_test(LONG* dx, LONG* dy, LONG* btn){
+  static const char* s; static int init, held; if(!init){ init=1; s=getenv("SWR_TEST_MOUSE"); }
+  if(!s) return; extern int g_frames;
+  while(*s){ char* e; long f=strtol(s,&e,10); if(e==s || *e!=':' || g_frames<f) break;
+    long x=strtol(e+1,&e,10); if(*e==',') e++; long y=strtol(e,&e,10); if(*e==',') e++; long b=strtol(e,&e,16);
+    *dx+=x; *dy+=y; held=(int)b; s= *e==';'? e+1 : e; }
+  *btn|=held; }
+static void mouse_apply(u64* b, i32* lx, i32* ly){
+  extern int g_opt_mouse_aim, g_opt_mouse_sens;
+  LONG dx=InterlockedExchange(&g_mdx,0), dy=InterlockedExchange(&g_mdy,0), btn=g_mbtn;
+  static float vx, vy; static int was;
+  mouse_test(&dx,&dy,&btn);
+  if(!g_opt_mouse_aim){ was=0; return; }
+  mouse_map();
+  for(int i=0;i<5;i++) if((btn>>i&1) && g_mb_bit[i]>=0) *b|=1ull<<g_mb_bit[i];
+  int aiming=(btn & mouse_aim_button())!=0;
+  if(aiming){
+    if(!was) vx=vy=0;
+    float s=(float)g_opt_mouse_sens/100.0f/150.0f;
+    vx+=(float)dx*s; vy-=(float)dy*s;   /* screen y is down, the stick's up */
+    float m=sqrtf(vx*vx+vy*vy); if(m>1.0f){ vx/=m; vy/=m; m=1.0f; }
+    if(m>=0.25f){ *lx=(i32)(vx/m*32767.0f); *ly=(i32)(vy/m*32767.0f); } else *lx=*ly=0;   /* aimed: full tilt that way */
+    { static int said; if(!said){ said=1; LOG("input: mouse free aim in use\n"); } } }
+  was=aiming; }
+
 void video_poll(void){
   u64 k=keys_held|keys_tapped, b=0;keys_tapped=0;
   i32 lx=axis(k,40,42), ly=axis(k,43,41), rx=axis(k,44,46), ry=axis(k,47,45);
@@ -474,6 +537,7 @@ void video_poll(void){
   if(test_replay){ phys=b; plx=lx; ply=ly; }   /* tests drive the menu with the replayed buttons */
   { extern int ov_pad(unsigned long long phys, int lx, int ly);   /* dread_ui/ov.cpp: 1 = the menu has the controller */
     if(ov_pad(phys,plx,ply)){ b=0; lx=ly=rx=ry=0; } }
+  if(!ov_is_open()) mouse_apply(&b,&lx,&ly);   /* the menu uses the mouse itself while open */
   { /* rumble (svc_hid.c hid_rumble_get) to the pads input comes from: on a change, else refreshed every 100 ms
        (SDL's rumble runs for the duration given, so it stops by itself when the game stops sending) */
     extern void hid_rumble_get(float*,float*); float lo, hi; hid_rumble_get(&lo,&hi);
@@ -484,6 +548,7 @@ void video_poll(void){
       if(sdl_ok && sdl_gcrumble){ int first= g_opt_ctrl_index>0? g_opt_ctrl_index-1 : 0, lastp= g_opt_ctrl_index>0? g_opt_ctrl_index : sdl_npad;
         for(int i=first;i<lastp && i<sdl_npad;i++) sdl_gcrumble(sdl_pad[i],ulo,uhi,ulo||uhi? 250 : 0); }
       if(xset && g_xpad>=0){ XVIB v={ulo,uhi}; xset((DWORD)g_xpad,&v); } } }
+  { extern u64 skip_hold_filter(u64); if(!ov_is_open()) b=skip_hold_filter(b); }   /* main.c: hold - to skip a cutscene */
   g_pad.buttons=b; g_pad.lx=lx; g_pad.ly=ly; g_pad.rx=rx; g_pad.ry=ry;
 }
 

@@ -133,6 +133,54 @@
     ]
    ]
   },
+  "code_127.c": {
+   "pristine": "85c70563edb6e3e593b5de9e71f32bc2416e1cb5a1066971c8dd96a0e023beb7",
+   "result": "9e65e8ffc05ac3dcca4f1c84966569f0616aa51eae0b4120ef88aab51cf5e1e6",
+   "hunks": [
+    [
+     31612,
+     31612,
+     [
+      "/* SWR skip_cutscenes, intro pages: with SWR_SKIP_INTRO=1 in the process environment (the runtime sets it when - is held",
+      "   during the story pages that open a new game), the page controller runs its own finish F_8ECEA24 - what it does after",
+      "   the last page: releases every page, stops the GUI and video, clears +88 - and the prologue mode then loads the game */",
+      "__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);",
+      "static int swr_skipintro(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_SKIP_INTRO\",b,sizeof b)>0 && b[0]=='1'; }"
+     ]
+    ],
+    [
+     31627,
+     31627,
+     [
+      " if(swr_skipintro()){ c->x[0]=c->x[19]; c->x[30]=149746724; F_8ECEA24(c,149744164); if(UNLIKELY(c->pc!=149746724)) return; goto L_8ECF424; }"
+     ]
+    ]
+   ]
+  },
+  "code_141.c": {
+   "pristine": "4368ab030d480043dfde5c2a0acc4dc83a29e2899a204604dc987ec999e5725f",
+   "result": "1a1a2310cacfc4a81c12257a690d420d69874f103e99ed863f65e57ef0f0e7b2",
+   "hunks": [
+    [
+     38283,
+     38283,
+     [
+      "/* SWR skip_cutscenes: with SWR_SKIP_CUTSCENES=1 in the process environment (set from the .ini), every cutscene the game marks",
+      "   skippable counts as already seen, so + then - skips it the first time too (as on a second viewing). F_906E2A0 is the",
+      "   game's can-skip check; F_919D6E0 is its seen-before lookup. Cutscenes the game never lets you skip stay unskippable */",
+      "__declspec(dllimport) unsigned long __stdcall GetEnvironmentVariableA(const char*,char*,unsigned long);",
+      "static int swr_skipcut(void){ char b[8]; return GetEnvironmentVariableA(\"SWR_SKIP_CUTSCENES\",b,sizeof b)>0 && b[0]=='1'; }"
+     ]
+    ],
+    [
+     38320,
+     38321,
+     [
+      " if(((u32)c->x[0]!=0) || swr_skipcut()) goto L_906E330;"
+     ]
+    ]
+   ]
+  },
   "code_152.c": {
    "pristine": "6c5f1074fc4e6dd25c25fc175ce5a1526d6898c22b988511f127184426c5abab",
    "result": "e11a1f0ba0d348e6bc1a6b82eac958790f84f7f81801bc716aff8b9f6ddaedcb",

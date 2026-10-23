@@ -16,8 +16,10 @@ extern int g_opt_hdr, g_opt_hdr_paper, g_opt_hdr_peak, g_opt_aa;   /* the runtim
 extern int backend_hdr_peak_nits(void);                  /* the display's peak, 0 if unknown */
 
 int vk_hdr_wanted(void) { return g_opt_hdr && g_vk_hdr_ext; }
-/* the present pass runs for HDR output or anti-aliasing (renderer.c show) */
-int vk_present_pass_wanted(void) { return g_vk_sc_hdr || g_opt_aa; }
+extern int g_opt_show_fps;                               /* FPS counter (main.c fps_overlay_rects) */
+extern int fps_overlay_rects(int W, int H, int (*r)[5], int max);
+/* the present pass runs for HDR output, anti-aliasing or the FPS counter (renderer.c show) */
+int vk_present_pass_wanted(void) { return g_vk_sc_hdr || g_opt_aa || g_opt_show_fps; }
 
 static VkImage g_mid;
 static VmaAllocation g_mid_mem;
@@ -239,6 +241,27 @@ void vk_hdr_resolve(VkCommandBuffer cb, VkImage sc) {
     rec_CmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_layout, 0, 1, &g_set, 0, NULL);
     rec_CmdPushConstants(cb, g_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, &pc);
     rec_CmdDraw(cb, 3, 1, 0, 0);
+    { /* SWR: the FPS counter as cleared rectangles over the picture, in the swapchain's encoding */
+        int r[64][5];
+        int n = fps_overlay_rects((int)g_vk.sc_extent.width, (int)g_vk.sc_extent.height, r, 64);
+        for (int i = 0; i < n; i++) {
+            VkClearAttachment ca = {VK_IMAGE_ASPECT_COLOR_BIT, 0, {{{0, 0, 0, 1}}}};
+            if (r[i][4]) {
+                float y[3] = {1.0f, 0.92f, 0.2f};
+                if (g_vk_sc_hdr == 1) { y[0] = 2.5f; y[1] = 2.2f; y[2] = 0.3f; }        /* scRGB: 1.0 = 80 nits */
+                else if (g_vk_sc_hdr == 2) { y[0] = 0.58f; y[1] = 0.56f; y[2] = 0.35f; } /* PQ code values, ~200 nits */
+                else if (g_vk.sc_srgb) { y[1] = 0.83f; y[2] = 0.033f; }                  /* linear for an sRGB view */
+                ca.clearValue.color.float32[0] = y[0]; ca.clearValue.color.float32[1] = y[1]; ca.clearValue.color.float32[2] = y[2];
+            }
+            int x0 = r[i][0] < 0 ? 0 : r[i][0], y0 = r[i][1] < 0 ? 0 : r[i][1];
+            int x1 = r[i][0] + r[i][2], y1 = r[i][1] + r[i][3];
+            if (x1 > (int)g_vk.sc_extent.width) x1 = (int)g_vk.sc_extent.width;
+            if (y1 > (int)g_vk.sc_extent.height) y1 = (int)g_vk.sc_extent.height;
+            if (x1 <= x0 || y1 <= y0) continue;
+            VkClearRect cr = {{{x0, y0}, {(u32)(x1 - x0), (u32)(y1 - y0)}}, 0, 1};
+            rec_CmdClearAttachments(cb, 1, &ca, 1, &cr);
+        }
+    }
     rec_CmdEndRendering(cb);
     vk_render_forget_state(); /* its pipeline and state, not a draw's: the next draw sets all again */
     vk_barrier(cb, sc, VK_IMAGE_ASPECT_COLOR_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,

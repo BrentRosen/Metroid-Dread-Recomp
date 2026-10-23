@@ -16,10 +16,82 @@ int g_frames;
 int g_opt_video_async_retire=0,g_opt_video_avx2=0,g_opt_video_block_copy=0;
 int g_present_pacing_candidate;
 int g_opt_audio_surround_downmix=0;
+/* FPS counter ([Graphics] show_fps): a seven-segment "123 FPS" in the top-left corner as plain rectangles, so every
+   build and renderer can draw it with clears (gpu_gl.c window pass, snxvk hdr.c present pass). Counted from presents,
+   i.e. the frames that reach the screen, over half a second. Each rect: x, y (top-left origin), w, h, 0 back / 1 text */
+int g_opt_show_fps=0;
+/* Hold - to skip ([Gameplay] skip_cutscenes): while a cutscene the game marks skippable plays, holding - for 0.7 s
+   presses + then - for the player (the game's own skip: + shows its prompt, - confirms; the DLL patch in code_141.c
+   lets it work the first time). The prompt (gpu_gl.c skip_prompt_draw) shows "Hold (-) to skip" meanwhile.
+   Dread v2.1.0 layout: cutscene manager = [[GOT 0x9CBF0F0]], its player at +88; on the player +116 = skippable,
+   +1200 = state (2 playing, 6 skipping) - read the way the game's can-skip check F_906E2A0 reads them */
+int g_opt_skip_cut=0;
+volatile int g_skip_prompt;            /* a skippable cutscene is playing */
+volatile float g_skip_hold;            /* 0..1 while - is held, 1 while the skip is sent */
+static int guest_readable(u64 a, u64 n){ if(!a || a>=AS_SIZE || n>AS_SIZE-a) return 0; MemBlock b; mem_query(a,&b);
+  return (b.perm&PERM_R) && a>=b.addr && a-b.addr+n<=b.size; }
+/* 1 = a skippable cutscene plays, 2 = story pages (the new-game intro): their page controller is [[GOT 0x9D30938]],
+   +89 enabled and +88 showing; the DLL patch in code_127.c runs its own finish F_8ECEA24 on SWR_SKIP_INTRO=1 */
+int cutscene_skippable_now(void){
+  static int force=-1; if(force<0) force=getenv("SWR_TEST_SKIP_PROMPT")!=NULL;   /* test: show the prompt at any time */
+  if(force) return 1;
+  if(!g_opt_skip_cut) return 0;
+  { u64 slot=0x9D30938; if(guest_readable(slot,8)){ u64 p=gr64(slot); if(guest_readable(p,8)){ u64 o=gr64(p);
+        if(guest_readable(o,90) && GP(o)[89] && GP(o)[88]) return 2; } } }
+  u64 slot=0x9CBF0F0; if(!guest_readable(slot,8)) return 0;
+  u64 p=gr64(slot); if(!guest_readable(p,8)) return 0;
+  u64 mgr=gr64(p); if(!guest_readable(mgr+88,8)) return 0;
+  u64 pl=gr64(mgr+88); if(!guest_readable(pl,1204)) return 0;
+  return GP(pl)[116] && gr32(pl+1200)==2;
+}
+static void env_switch(const char* name, int on);
+u64 skip_hold_filter(u64 b){   /* Switch button bits: 10 = +, 11 = - */
+  static u64 held_since, seq, tap; static int done, intro_req;
+  const u64 PLUS=1ull<<10, MINUS=1ull<<11, HOLD=700000000ull;
+  u64 now=plat_ns(); int can=cutscene_skippable_now(); g_skip_prompt=can;
+  { static int pc=-1, pm; int m=(b&MINUS)!=0; if(can!=pc || m!=pm){ if(g_opt_skip_cut) LOG("cutscene: skippable %d, - %s\n",can,m? "down" : "up"); pc=can; pm=m; } }
+  if(intro_req && can!=2){ intro_req=0; env_switch("SWR_SKIP_INTRO",0); }   /* the pages closed: request done */
+  if(seq){ u64 el=now-seq; b&=~(PLUS|MINUS);   /* + for 120 ms, nothing, then - for 120 ms */
+    if(el<120000000ull) b|=PLUS; else if(el>=240000000ull && el<360000000ull) b|=MINUS; else if(el>=480000000ull){ seq=0; done=1; }
+    g_skip_hold=1; return b; }
+  if(tap){ if(now-tap<120000000ull) b|=MINUS; else tap=0; }   /* a short press, handed on after its release */
+  if(!(b&MINUS) || tap){ if(held_since && now-held_since<300000000ull && !(b&MINUS)) tap=now;
+    held_since=0; if(!(b&MINUS)) done=0; g_skip_hold=0; return b; }
+  if(!can || done){ held_since=0; g_skip_hold=0; return b; }
+  b&=~MINUS; if(!held_since) held_since=now;
+  float f=(float)(now-held_since)/(float)HOLD; g_skip_hold=f>1? 1 : f;
+  if(now-held_since>=HOLD){ held_since=0;
+    if(can==2){ intro_req=1; done=1; env_switch("SWR_SKIP_INTRO",1); LOG("cutscene: hold - to skip the story pages\n"); }
+    else { seq=now; LOG("cutscene: hold - to skip\n"); } }
+  return b;
+}
+int fps_overlay_rects(int W,int H,int (*r)[5],int max){
+  static u64 t0;static u32 frames;static int fps=-1;
+  if(!g_opt_show_fps){t0=0;frames=0;fps=-1;return 0;}
+  u64 now=plat_ns();if(!t0)t0=now;else frames++;
+  if(now-t0>=500000000ull){fps=(int)(((u64)frames*2000000000ull/(now-t0)+1)/2);t0=now;frames=0;}
+  static const u8 digit[10]={0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F};
+  u8 glyph[8];int ng=0;
+  if(fps<0)glyph[ng++]=0x40;
+  else{char t[8];int k=snprintf(t,sizeof t,"%d",fps>999?999:fps);for(int i=0;i<k;i++)glyph[ng++]=digit[t[i]-'0'];}
+  glyph[ng++]=0;glyph[ng++]=0x71;glyph[ng++]=0x73;glyph[ng++]=0x6D;   /* space F P S */
+  float s=(float)H/1080.f;if(s<0.5f)s=0.5f;(void)W;
+  int dh=(int)(26*s+0.5f),dw=(int)(14*s+0.5f),t=(int)(3*s+0.5f),gap=(int)(6*s+0.5f),pad=(int)(8*s+0.5f),x0=(int)(16*s+0.5f),y0=x0;
+  if(t<2)t=2;
+  int n=0,total=ng*dw+(ng-1)*gap;
+  if(n<max){r[n][0]=x0-pad;r[n][1]=y0-pad;r[n][2]=total+2*pad;r[n][3]=dh+2*pad;r[n][4]=0;n++;}
+  int half=dh/2;
+  for(int i=0;i<ng;i++){int x=x0+i*(dw+gap),y=y0;
+    const int seg[7][4]={{x,y,dw,t},{x+dw-t,y,t,half+t/2},{x+dw-t,y+half-t/2,t,dh-half+t/2},{x,y+dh-t,dw,t},{x,y+half-t/2,t,dh-half+t/2},{x,y,t,half+t/2},{x,y+half-t/2,dw,t}};
+    for(int k=0;k<7&&n<max;k++)if(glyph[i]>>k&1){r[n][0]=seg[k][0];r[n][1]=seg[k][1];r[n][2]=seg[k][2];r[n][3]=seg[k][3];r[n][4]=1;n++;}}
+  return n;
+}
 int g_opt_audio_eos_sample_count=0;
 char g_opt_pad_map[128]="";   /* physical-position button remapping, empty = identity */
 int g_opt_ctrl_api=0, g_opt_ctrl_index=0, g_opt_deadzone=7000;
-char g_opt_button_icons[16]="auto";   /* [Input] button_icons: auto, switch, xbox, ps4, ps5 (svc_fs.c romfs_apply_mods) */   /* [Input]: api 0 auto, 1 SDL2, 2 XInput */
+char g_opt_button_icons[16]="auto";
+int g_opt_mouse_aim=1, g_opt_mouse_sens=100;   /* [Input] mouse free aim (backend_win32.c mouse_apply) */
+char g_opt_mouse_buttons[64]="y,l,r,-,-";   /* left, right, middle, back, forward -> Switch buttons */   /* [Input] button_icons: auto, switch, xbox, ps4, ps5 (svc_fs.c romfs_apply_mods) */   /* [Input]: api 0 auto, 1 SDL2, 2 XInput */
 int g_opt_diag=0;
 int g_opt_docked=0, g_opt_lang=1, g_opt_res=1, g_opt_fps=1, g_opt_vsync=0, g_opt_drs=0;
 int g_opt_media_turns=1;   /* serialize_media_threads, read by kernel.c core0_member */
@@ -222,9 +294,13 @@ static void ini_store(const char* k, const char* v){ for(int i=0;i<g_ini_n;i++) 
 
 static const char* ini_get(const char* k, const char* def){ for(int i=0;i<g_ini_n;i++) if(!strcmp(g_ini_k[i],k)) return g_ini_v[i]; return def; }
 
+static void env_switch(const char* name, int on);
 static void ini_apply(const char* k, const char* v){
     if(!strcmp(k,"docked")) g_opt_docked=atoi(v);
     else if(!strcmp(k,"controller_map")){ snprintf(g_opt_pad_map,sizeof g_opt_pad_map,"%s",v); }
+    else if(!strcmp(k,"mouse_aim")) g_opt_mouse_aim=atoi(v)!=0;
+    else if(!strcmp(k,"mouse_sensitivity")){ g_opt_mouse_sens=atoi(v); if(g_opt_mouse_sens<10) g_opt_mouse_sens=10; if(g_opt_mouse_sens>1000) g_opt_mouse_sens=1000; }
+    else if(!strcmp(k,"mouse_buttons")){ snprintf(g_opt_mouse_buttons,sizeof g_opt_mouse_buttons,"%s",v); extern void mouse_map_reset(void); mouse_map_reset(); }
     else if(!strcmp(k,"button_icons")) snprintf(g_opt_button_icons,sizeof g_opt_button_icons,"%s",v);
     else if(!strcmp(k,"controller_api")) g_opt_ctrl_api= !strcmp(v,"sdl")? 1 : !strcmp(v,"xinput")? 2 : 0;
     else if(!strcmp(k,"controller_index")){ g_opt_ctrl_index=atoi(v); if(g_opt_ctrl_index<0) g_opt_ctrl_index=0; }
@@ -258,6 +334,10 @@ static void ini_apply(const char* k, const char* v){
     else if(!strcmp(k,"hdr_peak")){ g_opt_hdr_peak=atoi(v); if(g_opt_hdr_peak<0) g_opt_hdr_peak=0; if(g_opt_hdr_peak>10000) g_opt_hdr_peak=10000; }
     else if(!strcmp(k,"prebuild_shaders")){ extern int g_opt_prebuild; g_opt_prebuild=atoi(v); }   /* gpu_gl.c prebuild_shaders */
     else if(!strcmp(k,"antialiasing")){ extern int g_opt_aa; g_opt_aa=atoi(v)!=0; }   /* FXAA: gpu_gl.c present pass, snxvk hdr.c */
+    else if(!strcmp(k,"show_fps")) g_opt_show_fps=atoi(v)!=0;   /* FPS counter, live */
+#ifndef SWR_NO_SKIPCUT
+    else if(!strcmp(k,"skip_cutscenes")){ g_opt_skip_cut=atoi(v)!=0; env_switch("SWR_SKIP_CUTSCENES",g_opt_skip_cut); }   /* read by the game DLL (code_141.c F_906E2A0), live */
+#endif
     else if(!strcmp(k,"anisotropy")){ g_opt_aniso=atoi(v); if(g_opt_aniso<0) g_opt_aniso=0; if(g_opt_aniso>16) g_opt_aniso=16; }
     else if(!strcmp(k,"ultrawide")){ extern int g_opt_ultrawide; if(!aspect_given) g_opt_ultrawide=atoi(v); }   /* loader.c: theboy181's 21:9 patch */
     else if(!strcmp(k,"aspect") && *v){ extern int g_opt_ultrawide;   /* aspect=16:9|21:9|16:10; overrides ultrawide= in any order */
@@ -294,6 +374,10 @@ static const IniOpt INI_GRAPHICS[]={
   {"dynamic_resolution","0","1 = lower the resolution automatically when the GPU can't keep up (down to dynamic_resolution_min)"},
   {"dynamic_resolution_min","0.6","Lowest internal resolution allowed by dynamic_resolution"},
   {"game_dynamic_resolution","0","1 = let the game lower its own resolution like on the console (0 = always full resolution)"},
+#ifndef SWR_NO_SKIPCUT
+  {"skip_cutscenes","0","1 = hold - (or + then -) to skip any cutscene the game lets you skip, even the first time; a prompt shows top left"},
+#endif
+  {"show_fps","0","1 = FPS counter in the top-left corner (frames that reach the screen)"},
   {"antialiasing","0","1 = smooth jagged edges (FXAA on the final picture; OpenGL and native Vulkan). Not needed at\n;   resolution above 1 (the downscale already averages) or with DLAA"},
   {"anisotropy","0","Texture filtering at an angle: 0 = as the game asks, 2/4/8/16 = at least that much\n;   (sharper floors and walls seen at an angle; samplers are made at first use, so a change applies on the next start)"},
   {"hdr","0","1 = HDR output (renderer=vulkan_native, Windows HDR on): the game's picture on an HDR swapchain, highlights\n;   expanded toward the display's peak (like Windows Auto HDR). Falls back to SDR when the display offers no HDR"},
@@ -337,6 +421,9 @@ static const IniOpt INI_FG[]={
   {NULL,NULL,NULL}};
 static const IniOpt INI_INPUT[]={
   {"controller_map","","16 comma-separated button destinations (0..15, -1 disabled); empty = default. Keyboard and sticks unchanged."},
+  {"mouse_aim","1","1 = mouse free aim: hold the right mouse button (the game's L, free aim) and move the mouse to aim\n;   in any direction; left click shoots (Y), middle click arms missiles (R). The cursor hides over the game"},
+  {"mouse_sensitivity","100","mouse free aim: how far the mouse moves for a full turn of the aim, in percent (10-1000)"},
+  {"mouse_buttons","y,l,r,-,-","mouse buttons left, right, middle, back, forward as Switch buttons: a b x y l r zl zr plus\n;   minus lstick rstick, - for none. The one set to l aims with the mouse while held"},
   {"button_icons","auto","the game's button pictures: auto = from the controller connected at start (Xbox and Steam Deck:\n;   Xbox icons, DualShock 4: PS4, DualSense: PS5, Switch or none: the originals), or switch, xbox, ps4, ps5.\n;   Needs the icon packs in Metroid Dread_data\\mods (the Play screen downloads them: Controls > Button icons)"},
   {"controller_api","auto","auto = SDL2 when SDL2.dll is next to the game (Bluetooth/USB Switch Pro, DualShock 4,\n;   DualSense, 8BitDo, Xbox...), else XInput. sdl or xinput to force one"},
   {"controller_index","0","0 = first connected controller, 1.. = that controller (in connection order) is player 1"},

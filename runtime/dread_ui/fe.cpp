@@ -81,6 +81,7 @@ static void apply_env(const IniFile& ini) {
     env("SWR_SYNC_SHADERS", ini.get("wait_for_shaders", "1") == "1");
     env("SWR_LOADING_60", ini.get("loading_60fps", "1") == "1");
     env("SWR_CUTSCENES_60FPS", ini.get("cutscenes_60fps", "0") == "1");
+    env("SWR_SKIP_CUTSCENES", ini.get("skip_cutscenes", "0") == "1");
 }
 
 // ---------------------------------------------------------------- D3D11
@@ -291,8 +292,12 @@ static void page_graphics() {
 
 static void page_gameplay() {
     page_title("GAMEPLAY", "Frame rate, cinematics and loading.");
-    section("FRAME RATE"); draw_opt("fps_limit"); draw_opt("forced_vsync");
+    section("FRAME RATE"); draw_opt("fps_limit"); draw_opt("forced_vsync"); draw_opt("show_fps");
     section("SCENES"); draw_opt("loading_60fps"); draw_opt("cutscenes_60fps");
+#ifndef SWR_NO_SKIPCUT
+    draw_opt("skip_cutscenes");
+#endif
+   
     section("LOADING AND RIDES"); draw_opt("fast_loading"); draw_opt("fast_forward"); if (getb("fast_forward")) draw_opt("fast_forward_speed");
 }
 
@@ -315,6 +320,7 @@ static void page_controls() {
         std::string f = pick_file(g_hwnd, "Choose SDL2.dll", L"SDL2", L"SDL2.dll");
         if (!f.empty()) { if (CopyFileW(wide(f).c_str(), wide(join(P.exedir, "SDL2.dll")).c_str(), FALSE)) flash("SDL2.dll installed: restart the launcher to use it"); else flash("Copy failed"); }
     }
+    section("MOUSE"); draw_opt("mouse_aim"); if (getb("mouse_aim")) draw_opt("mouse_sensitivity");
     section("BUTTON ICONS");
     draw_opt("button_icons");
     for (int i = 0; i < 3; i++) {
@@ -384,7 +390,8 @@ static void page_controls() {
     section("KEYBOARD (BUILT IN)");
     const char* kb[][2] = {{"D-pad", "Arrow keys"}, {"Left stick", "W A S D"}, {"Right stick", "I J K L"}, {"A", "X or Space"}, {"B (jump)", "Z"}, {"X", "C"}, {"Y", "V"},
                            {"L / R", "Q / E"}, {"ZL / ZR", "1 / 3"}, {"+ (pause) / - (map)", "Enter / Backspace"}, {"Menu", "F1"}, {"Screenshot", "F3 (F8 full resolution)"},
-                           {"Record video", "F7"}, {"Fullscreen", "F11 or Alt+Enter"}, {"Fast forward", "Tab"}, {"Quit", "Esc"}};
+                           {"Record video", "F7"}, {"Fullscreen", "F11 or Alt+Enter"}, {"Fast forward", "Tab"}, {"Quit", "Esc"},
+                           {"Free aim (L)", "Hold right mouse button, move the mouse"}, {"Shoot (Y)", "Left mouse button"}, {"Missiles (R)", "Middle mouse button"}};
     for (auto& r : kb) row_text(r[0], r[1]);
 }
 

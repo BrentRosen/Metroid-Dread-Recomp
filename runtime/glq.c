@@ -195,6 +195,8 @@ static void e_swap(void* p){
     }else deadline=0;
   }
   {extern int g_opt_vsync;extern void backend_gl_vsync(int);static int vs=-1;if(vs!=g_opt_vsync){vs=g_opt_vsync;backend_gl_vsync(vs);}}   /* forced_vsync applies live */
+  {extern void gpu_gl_fps_overlay(void);gpu_gl_fps_overlay();}   /* [Graphics] show_fps */
+  {extern void gpu_gl_skip_prompt(void);gpu_gl_skip_prompt();}   /* "Hold (-) to skip" during a skippable cutscene */
   {extern void ov_gl_frame(void);ov_gl_frame();}   /* in-game menu (dread_ui/ov.cpp) over the finished picture */
   u64 begin=trace?plat_ns():0;backend_gl_swap();
   u64 completed=__atomic_add_fetch(&g_swaps_done,1,__ATOMIC_SEQ_CST); q_done_signal();

@@ -509,7 +509,11 @@ static std::vector<Opt> build_options() {
     C("fps_limit", "Performance", "Gameplay", "Frame rate", LIVE_YES, "1", {{"1", "60 FPS (console)"}, {"120", "120 FPS"}, {"144", "144 FPS"}, {"240", "240 FPS"}, {"0", "Unlimited"}},
       "Dread's engine uses real elapsed time, so the game keeps its speed above 60 when your PC holds the cap steadily. Slow-motion moments run at 60.");
     B("forced_vsync", "Performance", "Gameplay", "Force VSync", LIVE_YES, "0", "Can lower FPS a lot on slow PCs.");
+    B("show_fps", "Graphics", "Gameplay", "FPS counter", LIVE_YES, "0", "Shows the frames per second that reach the screen, in the top-left corner.");
     B("loading_60fps", "Launcher", "Gameplay", "60 FPS elevators and loading screens", LIVE_YES, "1", "The game draws them at 30.");
+#ifndef SWR_NO_SKIPCUT
+    B("skip_cutscenes", "Gameplay", "Gameplay", "Skip any cutscene", LIVE_YES, "0", "Hold - to skip a cutscene, even the first time you see it. A prompt shows in the top-left corner while you can.");
+#endif
     B("cutscenes_60fps", "Launcher", "Gameplay", "60 FPS cutscenes (theboy181)", LIVE_YES, "0", "Port of theboy181's 60fps patch: cinematics show a new picture every 1/60 s.");
     B("fast_loading", "Performance", "Gameplay", "Fast loading", LIVE_YES, "0", "Shortens the game's fixed 60 ms pauses during loads (about 1 s faster first load).");
     B("fast_forward", "Performance", "Gameplay", "Fast-forward toggle (Tab or L3+R3)", LIVE_YES, "0", "For elevator and train rides. Don't leave it on during play.");
@@ -519,6 +523,9 @@ static std::vector<Opt> build_options() {
     B("audio_eos_sample_count", "Performance", "Audio", "Voice position fix at stream ends", LIVE_YES, "0", "Fixes cutscene music cutting out.");
     B("audio_surround_downmix", "Performance", "Audio", "Mix all six surround channels into stereo", LIVE_YES, "0", "");
     // Controls
+    B("mouse_aim", "Input", "Controls", "Mouse free aim", LIVE_YES, "1",
+      "Hold the right mouse button and move the mouse to aim in any direction. Left click shoots, middle click arms missiles.");
+    I("mouse_sensitivity", "Input", "Controls", "Mouse aim sensitivity", LIVE_YES, "100", 25, 400, 5, "Percent: higher turns the aim with less mouse movement.");
     C("button_icons", "Input", "Controls", "Button icons", LIVE_RESTART, "auto",
       {{"auto", "Automatic"}, {"switch", "Switch (original)"}, {"xbox", "Xbox"}, {"ps4", "PlayStation 4"}, {"ps5", "PlayStation 5"}},
       "Automatic: from the controller connected when the game starts. Xbox controllers and the Steam Deck get Xbox icons, DualShock 4 PS4 icons, DualSense PS5 icons, Switch controllers the originals.");
