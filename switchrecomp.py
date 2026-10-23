@@ -265,7 +265,7 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
         raise SystemExit('TCC cannot build the runtime: build it once with GCC (--build-runtime --cc gcc), '
                          'or use the prebuilt one from the release (%s).' % os.path.relpath(runtime_path(target_win, backend), HERE))
     gl = backend != 'headless'
-    extra = ['gpu_gl', 'gl_load', 'shader', 'astc', 'glq', 'glq_gen'] if gl else ['gpu_nogl']
+    extra = ['gpu_gl', 'gl_load', 'shader', 'astc', 'glq', 'glq_gen', 'dlss_gl'] if gl else ['gpu_nogl']
     gles = backend in ('x11es', 'android')
     if gles: extra += ['overlay']
     srcs = [os.path.join(RT, s + '.c') for s in RUNTIME_SRC + extra] + [os.path.join(RT, 'backend_%s.c' % backend), os.path.join(RT, 'entry.c')]
@@ -304,7 +304,7 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
     snxvk = os.path.join(RT, 'snxvk', 'libsnxvk_new_nodlss.a' if release else 'libsnxvk_new.a')   # ScarletNX main b5f4f14 (work-profiler/build_snxvk2.py)
     if os.environ.get('SWR_SNXVK_LIB'): snxvk = os.path.join(RT, 'snxvk', os.environ['SWR_SNXVK_LIB'])   # e.g. libsnxvk_new.a (re-vendor tests)
     snxvk = snxvk if os.path.isfile(snxvk) and target_win and backend == 'win32' and not os.environ.get('SWR_NO_SNXVK') else None
-    cmd = [cc, '-O' + opt, '-w', '-fno-strict-aliasing', '-Wl,-S', '-I', RT, '-I', os.path.join(RT, 'bcn'), '-I', os.path.join(RT, 'spvc'), '-I', os.path.join(RT, 'oh264', 'include'), '-I', os.path.join(RT, 'vp9', 'include')] + srcs + ['-o', out]
+    cmd = [cc, '-O' + opt, '-w', '-fno-strict-aliasing', '-Wl,-S', '-I', RT, '-I', os.path.join(RT, 'bcn'), '-I', os.path.join(RT, 'spvc'), '-I', os.path.join(RT, 'oh264', 'include'), '-I', os.path.join(RT, 'vp9', 'include'), '-I', os.path.join(RT, 'snxvk', 'deps', 'Vulkan-Headers-1.4.365', 'include')] + srcs + ['-o', out]
     if not h264: cmd += ['-DSWR_NO_H264']
     if vp9: cmd += ['-DSWR_HAVE_VP9']
     if release: cmd += ['-DSWR_RELEASE']

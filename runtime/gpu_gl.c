@@ -94,6 +94,24 @@ static GLuint link2(GLuint a, GLuint b, GLuint c3){
   GLuint p=glCreateProgram(); if(a) glAttachShader(p,a); if(b) glAttachShader(p,b); if(c3) glAttachShader(p,c3); glLinkProgram(p);
   GLint ok=0; glGetProgramiv(p,GL_LINK_STATUS,&ok); if(!ok){ char log[2048]; glGetProgramInfoLog(p,2048,NULL,log); WARN("GL link: %s\n",log); return 0; } return p; }
 
+/* DLAA (dlss=1): vertex shaders expose gl_Position to transform feedback (buffer 0, 16 bytes a vertex), so the scene's
+   depth-prepass draws can be captured and replayed for motion vectors. Only with DLAA on: the default build's shader
+   text, and so its cached binaries, stay as they were (the binary cache is keyed by the text) */
+extern int snxvk_dlss_mode;
+static char* dlg_vs_xfb(char* src){
+  static const char* decl="out gl_PerVertex { invariant vec4 gl_Position;";
+#ifdef SWR_RELEASE
+  return src;
+#endif
+  if(snxvk_dlss_mode<=0 || !src) return src;
+  char* d=strstr(src,decl); char* nl=strchr(src,'\n'); if(!d || !nl || nl>d) return src;
+  static const char* ext="#extension GL_ARB_enhanced_layouts : require\n";
+  static const char* nd="out gl_PerVertex { layout(xfb_buffer=0, xfb_offset=0) invariant vec4 gl_Position;";
+  size_t n=strlen(src)+strlen(ext)+strlen(nd)+1; char* o=malloc(n); if(!o) return src;
+  size_t a=(size_t)(nl+1-src), b=(size_t)(d-src);
+  memcpy(o,src,a); strcpy(o+a,ext); memcpy(o+a+strlen(ext),src+a,b-a); strcpy(o+a+strlen(ext)+(b-a),nd); strcat(o,d+strlen(decl));
+  free(src); return o; }
+
 /* ============================================================ formats */
 typedef struct { GLenum ifmt, fmt, type; u8 bpp, bw, bh, compressed, depth, is_int, astc, dec; } GlFmt;
 /* GLES: anything the hw can't sample gets decoded on the CPU */
@@ -788,7 +806,7 @@ static GLuint sampler_get(const u32* tsc){
 extern int g_glsl_version;
 struct WJob;
 typedef struct Sh { u64 hash; u32 key2; int stage; GLuint gl; ShaderInfo si; struct Sh* next; int failed; char* src;
-  GLuint sp; GLint uloc; int sps; struct WJob* sj; u32 clen; u64 qh; float lu[4]; int lu_ok; u64 skey; } Sh;   /* sp: this shader's own separable program */
+  GLuint sp; GLint uloc; int sps; struct WJob* sj; u32 clen; u64 qh; float lu[4]; int lu_ok; u64 skey; int xfb; } Sh;   /* sp: this shader's own separable program */
 static Sh* shh[1024];
 /* per-address cache. shader_hash walks the whole program (~50us per stage per draw on big shaders),
    within a submit a quick hash of the same range is enough */
@@ -899,7 +917,9 @@ static Sh* shader_get(u64 gva_code, int stage, u32 attr_int, u32 attr_sint){
   if(!cached){src=sh_post(src,stage);translated_save(trans_key,&s->si,src);}
   GLenum ty= stage==ST_VS? GL_VERTEX_SHADER : stage==ST_FS? GL_FRAGMENT_SHADER : stage==ST_GS? GL_GEOMETRY_SHADER : stage==ST_CS? GL_COMPUTE_SHADER : stage==ST_TCS? GL_TESS_CONTROL_SHADER : GL_TESS_EVALUATION_SHADER;
   (void)ty; if(!src) s->failed=1;
+  if(stage==ST_VS) src=dlg_vs_xfb(src);   /* DLAA: positions captured for motion vectors */
   s->src=src; src=NULL;   /* only compiled if it isn't in the disk cache */
+  s->xfb= stage==ST_VS && s->src && strstr(s->src,"xfb_offset")!=NULL;
   { static int dump=-1; if(dump<0){ dump=getenv("SWR_DUMP_SHADERS")!=NULL; } if(dump && s->src){ char pth[256]; snprintf(pth,sizeof pth,"shader_%016llx_%d.glsl",(unsigned long long)h,stage); FILE* f=fopen(pth,"w"); if(f){ fputs(s->src,f); fclose(f);} } }
   free(src); free(tmp);
   s->next=shh[h&1023]; shh[h&1023]=s; return s; }
@@ -1320,6 +1340,8 @@ static GLenum stencil_op(u32 v){ switch(v){ case 1: return GL_KEEP; case 2: retu
 static int g_state_ok; static u32 g_state_sig[256]; static u64 st_state_skip;
 /* native 0..1 depth (GL 4.5 clip control). remapping z*2-w in the shader loses precision far away */
 static PFNGLCLIPCONTROLPROC p_clip; static int g_clip_mode=-1;
+static float g_dl_jx, g_dl_jy;              /* DLAA: this draw's sub-pixel jitter (0 unless a jittered scene draw) */
+static float g_dl_vp[4], g_dl_dr[2], g_dl_po[3];   /* the draw's unjittered viewport, depth range, polygon offset (for the replay) */
 static int g_gs_ok;
 
 static void state_dirty(void){ g_state_ok=0; g_gs_ok=0; }
@@ -1461,7 +1483,7 @@ static void apply_state(GpuChannel* ch){
     SR(0x4B3,0x4B3) SR(0x4B8,0x4BA) SR(0x4C3,0x4C3) SR(0x4C7,0x4CA) SR(0x4D0,0x4DF) SR(0x4E0,0x4E7) SR(0x4ED,0x4ED) SR(0x546,0x546)
     SR(0x55B,0x55B) SR(0x565,0x569) SR(0x56F,0x56F) SR(0x591,0x592) SR(0x646,0x648) SR(0x680,0x687) SR(0x780,0x7BF)
 #undef SR
-    sig[n++]= g_zt? 1u : 0u; memcpy(&sig[n++],&g_scale,4);
+    sig[n++]= g_zt? 1u : 0u; memcpy(&sig[n++],&g_scale,4); memcpy(&sig[n++],&g_dl_jx,4); memcpy(&sig[n++],&g_dl_jy,4);
     if(g_state_ok && !memcmp(sig,g_state_sig,(size_t)n*4)){ st_state_skip++; return; }
     memcpy(g_state_sig,sig,(size_t)n*4); g_state_ok=1; }
   if(p_clip){ int m=r[0x35F]&1; if(m!=g_clip_mode){ p_clip(0x8CA1 /* LOWER_LEFT */, m? 0x935F /* ZERO_TO_ONE */ : 0x935E /* NEGATIVE_ONE_TO_ONE */); g_clip_mode=m; } }
@@ -1471,16 +1493,18 @@ static void apply_state(GpuChannel* ch){
   u32 gsc; memcpy(&gsc,&g_scale,4);
   float vt[6]; memcpy(vt,&r[0x280],24);
   float sx=vt[0], sy=vt[1], tx=vt[3], ty=vt[4];
-  { GRP(0, r[0x280],r[0x281],r[0x282],r[0x283],r[0x284],r[0x285],r[0x35F],r[0x300],r[0x301],r[0x302],r[0x303],r[0x380],r[0x381],r[0x382],gsc){
+  u32 gjx, gjy; memcpy(&gjx,&g_dl_jx,4); memcpy(&gjy,&g_dl_jy,4);
+  { GRP(0, r[0x280],r[0x281],r[0x282],r[0x283],r[0x284],r[0x285],r[0x35F],r[0x300],r[0x301],r[0x302],r[0x303],r[0x380],r[0x381],r[0x382],gsc,gjx,gjy){
     float x0=tx-fabsf_(sx), y0=ty-fabsf_(sy), w=2*fabsf_(sx), h=2*fabsf_(sy);
     if(w<1||h<1){ u32 vx=r[0x300], vy=r[0x301]; x0=(float)(vx&0xFFFF); w=(float)(vx>>16); y0=(float)(vy&0xFFFF); h=(float)(vy>>16); }
-    glViewportIndexedf(0,x0*g_scale,y0*g_scale,w*g_scale,h*g_scale);
+    glViewportIndexedf(0,x0*g_scale+g_dl_jx,y0*g_scale+g_dl_jy,w*g_scale,h*g_scale);
+    g_dl_vp[0]=x0*g_scale; g_dl_vp[1]=y0*g_scale; g_dl_vp[2]=w*g_scale; g_dl_vp[3]=h*g_scale;
     float n, f; memcpy(&n,&r[0x302],4); memcpy(&f,&r[0x303],4);
     /* depth goes through the viewport transform (z*scale_z+translate_z) like on hw / yuzu's vk backend.
        SMO's fog pass draws at z=1 with NOTEQUAL to skip the sky, so this has to be exact */
     if((vt[2]!=0.0f || vt[5]!=0.0f) && !getenv("SWR_DEPTH_REGS")){ float red= (r[0x35F]&1)? 0.0f : 1.0f; n=vt[5]-vt[2]*red; f=vt[5]+vt[2];
       if(fabsf_(n)<1e-6f) n=0.0f; if(fabsf_(n-1.0f)<1e-6f) n=1.0f; if(fabsf_(f)<1e-6f) f=0.0f; if(fabsf_(f-1.0f)<1e-6f) f=1.0f; }
-    glDepthRangeIndexed(0,n,f);
+    glDepthRangeIndexed(0,n,f); g_dl_dr[0]=n; g_dl_dr[1]=f;
     if(r[0x380]&1){ u32 xs=r[0x381], ys=r[0x382]; glEnable(GL_SCISSOR_TEST); glScissorIndexed(0,(GLint)((xs&0xFFFF)*g_scale),(GLint)((ys&0xFFFF)*g_scale),(GLsizei)(((xs>>16)-(xs&0xFFFF))*g_scale+0.5f),(GLsizei)(((ys>>16)-(ys&0xFFFF))*g_scale+0.5f)); }
     else glDisable(GL_SCISSOR_TEST); } }
   /* raster state (winding flips with the Y flip) */
@@ -1489,7 +1513,7 @@ static void apply_state(GpuChannel* ch){
     if(r[0x646]){ glEnable(GL_CULL_FACE); glCullFace(r[0x648]==0x404? GL_FRONT : r[0x648]==0x408? GL_FRONT_AND_BACK : GL_BACK); } else glDisable(GL_CULL_FACE);
     { GLenum ff= r[0x647]==0x900? GL_CW : GL_CCW; if(yflip) ff= ff==GL_CW? GL_CCW : GL_CW; glFrontFace(ff); }
     glPolygonMode(GL_FRONT_AND_BACK, r[0x36B]==0x1B01? GL_LINE : r[0x36B]==0x1B00? GL_POINT : GL_FILL);
-    if(r[0x372]){ float fac, un; memcpy(&fac,&r[0x55B],4); memcpy(&un,&r[0x56F],4); glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(fac,un); } else glDisable(GL_POLYGON_OFFSET_FILL); } }
+    if(r[0x372]){ float fac, un; memcpy(&fac,&r[0x55B],4); memcpy(&un,&r[0x56F],4); glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(fac,un); g_dl_po[0]=1; g_dl_po[1]=fac; g_dl_po[2]=un; } else { glDisable(GL_POLYGON_OFFSET_FILL); g_dl_po[0]=0; } } }
   /* depth / stencil */
   { u32 z= g_zt? 1u : 0u;
     GRP(2, z,r[0x4B3],r[0x4C3],r[0x4BA],r[0x4E0],r[0x4E1],r[0x4E2],r[0x4E3],r[0x4E4],r[0x4E5],r[0x4E6],r[0x4E7],r[0x565],r[0x566],r[0x567],r[0x568],r[0x569],r[0x3D5],r[0x3D6],r[0x3D7]){
@@ -1718,6 +1742,178 @@ static GLuint null_tex(GLenum tg){
   mb_reset(); return *p; }
 
 static int getenv_cached_rtswz(void){ static int v=-1; if(v<0) v=getenv("SWR_OLD_RT_SWIZZLE")!=NULL; return v; }   /* 1 = old behaviour, ignore reorders on RTs */
+/* DLAA on the OpenGL renderer ([Graphics] dlss=1, dlss_gl.c runs NGX through Vulkan). Where it runs in Dread's frame
+   (measured with the native Vulkan renderer, see snxvk dlss.c): the scene is the last full-size R11G11B10F target read by
+   a full-size R11G11B10F pass before the first small (<= 1/4 width) pass, i.e. the post-effects input. DLSS runs on it at
+   its first read after it was drawn this frame, so post effects, bloom and the HUD get the anti-aliased image. A new
+   target has to win 30 frames in a row before DLSS moves to it; 30 frames without one (menus, videos) drop it */
+extern int snxvk_dlss_mode; extern int dlgl_failed(void);
+extern void dlgl_queue(GLuint color, GLuint depth, GLuint mv, GLenum zfmt, u32 w, u32 h, float jx, float jy, int reset);
+static struct {
+  u64 reads[16]; int nreads; u64 written[8]; int nwritten;
+  u64 cand, cand_z, last_z, frame_best, frame_best_z; int small_seen; u32 scene_w, scene_h; Tex* last_rt0;
+  u64 stable, stable_z, chosen, chosen_z; int streak, missing, done, reset, evals, evaluated;
+  Tex *need, *need_z;    /* DLSS runs before the draw that first reads the scene target */
+} g_dlg;
+#ifdef SWR_RELEASE   /* the public release has no DLSS (NVIDIA's licence question is open): off whatever the .ini says */
+static int dlg_on(void){ return 0; }
+#else
+static int dlg_on(void){ return snxvk_dlss_mode>0 && !g_gles && !dlgl_failed(); }
+#endif
+static int dlg_full_hdr(const Tex* t){ return t && t->f.ifmt==GL_R11F_G11F_B10F && g_dlg.scene_w && t->w==g_dlg.scene_w && t->h==g_dlg.scene_h; }
+static int dlg_written(u64 a){ for(int i=0;i<g_dlg.nwritten;i++) if(g_dlg.written[i]==a) return 1; return 0; }
+static Tex* dlg_find(u64 gva, int depth){ for(Tex* t=texh[hkey(gva)];t;t=t->next) if(t->gva==gva && t->is_rt && !!t->f.depth==depth) return t; return NULL; }
+/* bind_textures: a render target about to be sampled. The chosen scene target's first read this frame runs DLSS */
+static void dlg_read(Tex* t){
+  if(!dlg_on() || !t->is_rt) return;
+  if(dlg_full_hdr(t) && g_dlg.nreads<16){ int dup=0; for(int i=0;i<g_dlg.nreads;i++) dup|=g_dlg.reads[i]==t->gva; if(!dup) g_dlg.reads[g_dlg.nreads++]=t->gva; }
+  if(g_dlg.done || !g_dlg.chosen || t->gva!=g_dlg.chosen || !dlg_written(t->gva)) return;
+  g_dlg.done=1;
+  Tex* z= g_dlg.chosen_z? dlg_find(g_dlg.chosen_z,1) : NULL;
+  if(!z || z->w!=t->w || z->h!=t->h || t->target!=GL_TEXTURE_2D || z->target!=GL_TEXTURE_2D) return;
+  g_dlg.need=t; g_dlg.need_z=z; }
+/* r3d_draw_gl, after the draw's textures are bound: a new small pass ends the scene part of the frame; what it writes */
+static void dlg_draw(void){
+  if(!dlg_on()){ g_dlg.nreads=0; return; }
+  Tex* rt0= g_nrt? g_rt[0] : NULL;
+  if(g_zt && g_zt->f.depth && rt0 && rt0->w==g_zt->w && rt0->h==g_zt->h && g_zt->w>=640){ g_dlg.last_z=g_zt->gva; g_dlg.scene_w=g_zt->w; g_dlg.scene_h=g_zt->h; }
+  if(rt0 && rt0!=g_dlg.last_rt0 && !g_dlg.small_seen && g_dlg.scene_w && rt0->w*4<=g_dlg.scene_w){   /* the first small pass */
+    g_dlg.small_seen=1; g_dlg.frame_best=g_dlg.cand;
+    for(int i=0;i<g_dlg.nreads;i++) g_dlg.frame_best=g_dlg.reads[i];   /* the target the bloom pass reads: after the post effects */
+    g_dlg.frame_best_z=g_dlg.cand_z; }
+  g_dlg.last_rt0=rt0;
+  if(dlg_full_hdr(rt0)){
+    if(!dlg_written(rt0->gva) && g_dlg.nwritten<8) g_dlg.written[g_dlg.nwritten++]=rt0->gva;
+    for(int i=0;i<g_dlg.nreads;i++) if(g_dlg.reads[i]!=rt0->gva){ g_dlg.cand=g_dlg.reads[i]; g_dlg.cand_z=g_dlg.last_z; } }
+  g_dlg.nreads=0; }
+/* ---- jitter and motion vectors (as in the native Vulkan renderer's dlss.c): each depth-prepass draw of the scene
+   (depth writes on, triangle list, no geometry/tessellation stage) has its positions captured by transform feedback;
+   at the DLSS point the frame's captured draws are drawn again with this frame's positions and last frame's of the same
+   draw (same vertex shader, buffers and draw parameters, the n-th such draw of the frame), depth test EQUAL against the
+   scene depth, so a pixel gets the motion of the surface the game shows there. Jitter: the scene draws that write depth
+   or test it EQUAL (prepass and G-buffer) move by a sub-pixel Halton(2,3) offset through the viewport */
+#define DMV_BYTES (64u<<20)
+#define DMV_MAX 2048
+typedef struct { u64 key; u32 occ, off, verts; float vp[4], vpj[4], dr[2], po[3]; int clip; } DmvRec;
+static struct { GLuint buf[2]; u32 used[2], nrec[2], cur; DmvRec rec[2][DMV_MAX];
+  float jx, jy; u32 jframe; int jit_ok, jit_used, hold, misses, failed;
+  GLuint prog, vao, fbo, mv; u32 mvw, mvh; GLint loc_c, loc_p; } g_dmv;
+extern void* glq_alloc(size_t sz, size_t extra, void (*ex)(void*)); extern void glq_commit(void); extern int glq_active(void);
+typedef void (APIENTRY* PFN_BTF)(GLenum); typedef void (APIENTRY* PFN_ETF)(void);
+static PFN_BTF r_btf; static PFN_ETF r_etf;
+static volatile int g_tf_missing;
+static void e_tf(void* p){   /* on the GL thread, where the driver hands out the functions */
+  if(!r_btf){ r_btf=(PFN_BTF)backend_gl_proc("glBeginTransformFeedback"); r_etf=(PFN_ETF)backend_gl_proc("glEndTransformFeedback"); }
+  if(!r_btf || !r_etf){ g_tf_missing=1; return; }
+  if(*(int*)p) r_btf(GL_TRIANGLES); else r_etf(); }
+static void dmv_tf(int begin){   /* begin/end transform feedback: not in the queue's table, a custom entry on the GL thread */
+  if(!glq_active()){ e_tf(&begin); return; }
+  int* q=(int*)glq_alloc(sizeof(int),0,e_tf); *q=begin; glq_commit(); }
+static float halton(u32 i, u32 b){ float f=1, r=0; for(;i;i/=b){ f/=(float)b; r+=f*(float)(i%b); } return r; }
+static int dlg_scene_draw(void){ return dlg_on() && !g_dmv.failed && g_dlg.chosen && !g_dlg.done && g_zt && g_zt->gva==g_dlg.chosen_z; }
+/* r3d_draw_gl, before apply_state: this draw's jitter */
+static void dlg_jitter(u32* r){
+  g_dl_jx=g_dl_jy=0;
+  { static int nj=-1; if(nj<0) nj=getenv("SWR_DLSS_NO_JITTER")!=NULL; if(nj) return; }
+  if(!g_dmv.jit_ok || !dlg_scene_draw()) return;
+  int zw= r[0x4BA] && r[0x4B3], zeq= r[0x4B3] && cmp_func(r[0x4C3])==GL_EQUAL;
+  if(!zw && !zeq) return;
+  g_dl_jx=g_dmv.jx; g_dl_jy=g_dmv.jy; g_dmv.jit_used=1; }
+/* r3d_draw_gl, around the draw call: capture a prepass draw's positions. 1 = capturing (end it after the draw) */
+static int dlg_capture_begin(u32* r, Sh* vs, GLenum mode, int topology, int indexed, u32 first, u32 count, u32 base_vertex, u32 instances){
+  if(g_tf_missing && !g_dmv.failed){ g_dmv.failed=1; LOG("dlaa (OpenGL): no transform feedback: no motion vectors\n"); }
+  if(!vs->xfb || mode!=GL_TRIANGLES || topology!=4 || !dlg_scene_draw() || !(r[0x4BA] && r[0x4B3]) || ((r[0x820]|r[0x830]|r[0x840])&1)) return 0;
+  u64 verts=(u64)count/3*3*instances; if(verts<3 || count%3) return 0;
+  u32 c=g_dmv.cur; u64 bytes=verts*16;
+  if(g_dmv.nrec[c]>=DMV_MAX || g_dmv.used[c]+bytes>DMV_BYTES) return 0;
+  if(!g_dmv.buf[0]){
+    glGenBuffers(2,g_dmv.buf);
+    for(int i=0;i<2;i++){ glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,g_dmv.buf[i]); glBufferData(GL_TRANSFORM_FEEDBACK_BUFFER,DMV_BYTES,NULL,GL_DYNAMIC_COPY); }
+    glBindBuffer(GL_TRANSFORM_FEEDBACK_BUFFER,0); }
+  DmvRec* d=&g_dmv.rec[c][g_dmv.nrec[c]];
+  u64 vb=((u64)r[0x701]<<32)|r[0x702], ib= indexed? (((u64)r[0x5F2]<<32)|r[0x5F3]) : 0;
+  d->key=vs->hash ^ vb*0x9E3779B97F4A7C15ull ^ ib*0xC2B2AE3D27D4EB4Full ^ ((u64)first<<32 ^ count) ^ ((u64)base_vertex<<20) ^ ((u64)instances<<48) ^ (u64)indexed;
+  d->occ=0; for(u32 i=0;i<g_dmv.nrec[c];i++) if(g_dmv.rec[c][i].key==d->key) d->occ++;
+  d->off=g_dmv.used[c]; d->verts=(u32)verts;
+  memcpy(d->vp,g_dl_vp,16); d->vpj[0]=g_dl_vp[0]+g_dl_jx; d->vpj[1]=g_dl_vp[1]+g_dl_jy; d->vpj[2]=g_dl_vp[2]; d->vpj[3]=g_dl_vp[3];
+  memcpy(d->dr,g_dl_dr,8); memcpy(d->po,g_dl_po,12); d->clip=r[0x35F]&1;
+  glBindBufferRange(GL_TRANSFORM_FEEDBACK_BUFFER,0,g_dmv.buf[c],(GLintptr)d->off,(GLsizeiptr)bytes);
+  dmv_tf(1);
+  g_dmv.nrec[c]++; g_dmv.used[c]+=(u32)bytes;
+  return 1; }
+static void dlg_capture_end(void){ dmv_tf(0); }
+/* the motion-vector image for this frame (render size); 0 when there is nothing to draw */
+static GLuint dlg_mv_pass(Tex* z, u32 w, u32 h){
+  u32 c=g_dmv.cur, pv=c^1;
+  if(g_dmv.failed || !g_dmv.nrec[c] || getenv("SWR_DLSS_NO_MV")) return 0;
+  if(!g_dmv.prog){
+    static const char* vs="#version 430 core\nlayout(location=0) in vec4 cur; layout(location=1) in vec4 prev; out vec4 vc; out vec4 vp;\n"
+      "invariant gl_Position;\nvoid main(){ vc=cur; vp=prev; gl_Position=cur; }";
+    static const char* fs="#version 430 core\nin vec4 vc; in vec4 vp; uniform vec4 vcur; uniform vec4 vprev; out vec2 mv;\n"
+      "void main(){ vec2 nc=vc.xy/vc.w, np=vp.xy/vp.w; vec2 sc=vcur.xy+(nc*0.5+0.5)*vcur.zw; vec2 sp=vprev.xy+(np*0.5+0.5)*vprev.zw; mv=sp-sc; }";
+    char err[512]; GLuint a=compile(GL_VERTEX_SHADER,vs,err,sizeof err), b=compile(GL_FRAGMENT_SHADER,fs,err,sizeof err);
+    g_dmv.prog= a&&b? link2(a,b,0) : 0;
+    if(!g_dmv.prog){ g_dmv.failed=1; LOG("dlaa (OpenGL): motion-vector program failed: no motion vectors\n"); return 0; }
+    g_dmv.loc_c=glGetUniformLocation(g_dmv.prog,"vcur"); g_dmv.loc_p=glGetUniformLocation(g_dmv.prog,"vprev");
+    glGenVertexArrays(1,&g_dmv.vao); glGenFramebuffers(1,&g_dmv.fbo); }
+  if(g_dmv.mvw!=w || g_dmv.mvh!=h){
+    if(g_dmv.mv) glDeleteTextures(1,&g_dmv.mv);
+    glGenTextures(1,&g_dmv.mv); glBindTexture(GL_TEXTURE_2D,g_dmv.mv); glTexStorage2D(GL_TEXTURE_2D,1,GL_RG16F,(GLsizei)w,(GLsizei)h);
+    g_dmv.mvw=w; g_dmv.mvh=h; mb_reset(); }
+  glBindFramebuffer(GL_FRAMEBUFFER,g_dmv.fbo);
+  glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,g_dmv.mv,0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_STENCIL_ATTACHMENT,GL_TEXTURE_2D,0,0);
+  glFramebufferTexture2D(GL_FRAMEBUFFER,z->f.fmt==GL_DEPTH_STENCIL? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,z->id,0);
+  { GLenum b0=GL_COLOR_ATTACHMENT0; glDrawBuffers(1,&b0); }
+  glDisable(GL_SCISSOR_TEST); glDisablei(GL_BLEND,0); glDisable(GL_STENCIL_TEST); glDisable(GL_CULL_FACE); glDisable(GL_FRAMEBUFFER_SRGB);
+  glColorMaski(0,1,1,1,1); glViewportIndexedf(0,0,0,(float)w,(float)h);
+  { float zero[4]={0,0,0,0}; glClearBufferfv(GL_COLOR,0,zero); }
+  glColorMaski(0,1,1,0,0); glEnable(GL_DEPTH_TEST); glDepthFunc(GL_EQUAL); glDepthMask(GL_FALSE);
+  glUseProgram(g_dmv.prog); glBindVertexArray(g_dmv.vao); glEnableVertexAttribArray(0); glEnableVertexAttribArray(1);
+  u32 drawn=0; int clip=-1, po=-1;
+  for(u32 i=0;i<g_dmv.nrec[c];i++){ const DmvRec* d=&g_dmv.rec[c][i]; const DmvRec* q=NULL;
+    for(u32 k=0;k<g_dmv.nrec[pv] && !q;k++){ const DmvRec* e=&g_dmv.rec[pv][k]; if(e->key==d->key && e->occ==d->occ && e->verts==d->verts) q=e; }
+    if(!q) continue;   /* new this frame: no previous position, zero motion */
+    glBindBuffer(GL_ARRAY_BUFFER,g_dmv.buf[c]); glVertexAttribPointer(0,4,GL_FLOAT,GL_FALSE,16,(void*)(size_t)d->off);
+    glBindBuffer(GL_ARRAY_BUFFER,g_dmv.buf[pv]); glVertexAttribPointer(1,4,GL_FLOAT,GL_FALSE,16,(void*)(size_t)q->off);
+    glUniform4fv(g_dmv.loc_c,1,d->vp); glUniform4fv(g_dmv.loc_p,1,q->vp);
+    glViewportIndexedf(0,d->vpj[0],d->vpj[1],d->vpj[2],d->vpj[3]); glDepthRangeIndexed(0,d->dr[0],d->dr[1]);
+    if(p_clip && d->clip!=clip){ clip=d->clip; p_clip(0x8CA1,clip? 0x935F : 0x935E); }
+    if((int)d->po[0]!=po || po){ po=(int)d->po[0]; if(po){ glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(d->po[1],d->po[2]); } else glDisable(GL_POLYGON_OFFSET_FILL); }
+    glDrawArrays(GL_TRIANGLES,0,(GLsizei)d->verts); drawn++; }
+  glDepthMask(GL_TRUE);
+  /* the renderer's cached GL state is stale now: everything is set again by the next draw */
+  state_dirty(); g_fb_sig_ok=0; g_clip_mode=-1; g_pipe_on=0;
+  { static int said; if(said<2){ said++; LOG("dlaa (OpenGL): motion vectors from %u of %u captured draws\n",drawn,g_dmv.nrec[c]); } }
+  return g_dmv.mv; }
+/* r3d_draw_gl, after the draw's textures are bound: DLSS on the scene target this draw is about to read. The draw's own
+   framebuffer, program and state are set again afterwards */
+static int dlg_eval(void){
+  Tex* t=g_dlg.need; Tex* z=g_dlg.need_z; g_dlg.need=g_dlg.need_z=NULL;
+  if(!t || !z) return 0;
+  u32 w=SC(t->w), h=SC(t->h);
+  GLuint mv=dlg_mv_pass(z,w,h);
+  dlgl_queue(t->id,z->id,mv,z->f.ifmt,w,h,g_dmv.jit_used? g_dmv.jx : 0.0f,g_dmv.jit_used? g_dmv.jy : 0.0f,g_dlg.reset);
+  g_dlg.reset=0; t->wgen++; g_dlg.evals++; g_dlg.evaluated=1;
+  { static int said; if(!said){ said=1; LOG("dlaa (OpenGL): scene target %llx %ux%u, depth %llx\n",(unsigned long long)t->gva,w,h,(unsigned long long)z->gva); } }
+  return 1; }
+
+/* each present */
+static void dlg_frame(void){
+  if(!dlg_on()) return;
+  { static int started; if(!started){ started=1; dlgl_queue(0,0,0,0,0,0,0.0f,0.0f,0); } }   /* NGX up now, not at the first DLAA frame */
+  if(g_dlg.small_seen && g_dlg.frame_best){ g_dlg.missing=0;
+    if(g_dlg.frame_best==g_dlg.stable) g_dlg.streak=0;
+    else if(!g_dlg.stable || ++g_dlg.streak>=30){ g_dlg.stable=g_dlg.frame_best; g_dlg.stable_z=g_dlg.frame_best_z; g_dlg.streak=0; g_dlg.reset=1; } }
+  else if(++g_dlg.missing>=30) g_dlg.stable=0;
+  g_dlg.chosen=g_dlg.stable; g_dlg.chosen_z=g_dlg.stable_z;
+  g_dmv.cur^=1; g_dmv.nrec[g_dmv.cur]=0; g_dmv.used[g_dmv.cur]=0;
+  { u32 i=(g_dmv.jframe++%8)+1; g_dmv.jx=halton(i,2)-0.5f; g_dmv.jy=halton(i,3)-0.5f; }
+  if(g_dmv.jit_used && !g_dlg.evaluated){ g_dmv.hold=60; g_dmv.misses++; } else if(g_dmv.hold) g_dmv.hold--;   /* jittered without DLSS: that frame shook */
+  g_dmv.jit_ok= g_dlg.evaluated && !g_dmv.hold; g_dmv.jit_used=0; g_dlg.evaluated=0;
+  g_dlg.nwritten=g_dlg.nreads=0; g_dlg.cand=g_dlg.cand_z=0; g_dlg.frame_best=g_dlg.frame_best_z=0;
+  g_dlg.small_seen=0; g_dlg.done=0; g_dlg.last_rt0=NULL; }
+
 /* Resolution scale, downsampling and small-buffer passes: the game shrinks the scene for its bloom and glow with a few taps per
    output pixel, placed for the guest resolution. At 4x those taps meet 1 rendered pixel in 16, so small bright things
    (sparks, lamps) came out as dotted grids of glow and the lighting looked wrong (MEASURED 2026-10-22: light-res4 vs
@@ -1764,7 +1960,7 @@ static void bind_textures(GpuChannel* ch, int stage, Sh* s){
     /* the shader's sampler type wins */
     GLenum want= st->type==2? GL_TEXTURE_3D : st->type==3? (st->array? GL_TEXTURE_CUBE_MAP_ARRAY : GL_TEXTURE_CUBE_MAP) : st->array? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;
     tids[i]=0;
-    if(t && t->target==want && !(want==GL_TEXTURE_3D && t->zero3d && !t->is_rt)){ GLuint use=t->id;
+    if(t && t->target==want && !(want==GL_TEXTURE_3D && t->zero3d && !t->is_rt)){ if(t->is_rt) dlg_read(t); GLuint use=t->id;
       if(want==GL_TEXTURE_2D && downsample_read(t,st)){ GLuint pf=rt_prefiltered(t); if(pf) use=pf; }
       { static int dbg=-1; if(dbg<0) dbg=getenv("SWR_PREFILTER_DEBUG")!=NULL;
         if(dbg && t->is_rt && g_rt[0] && g_rt[0]!=t && (t->w>g_rt[0]->w || t->h>g_rt[0]->h)){ static u64 seen[64]; static int ns; u64 k=((u64)t->w<<48)^((u64)t->h<<32)^((u64)g_rt[0]->w<<16)^g_rt[0]->h^((u64)st->fetch_only<<63)^((u64)stage<<60);
@@ -2104,6 +2300,7 @@ void r3d_draw_gl(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count
     if(g_pipe_vs!=vpp){ p_ups(g_pipe,0x00000001 /* VERTEX_SHADER_BIT */,vpp); g_pipe_vs=vpp; }
     if(g_pipe_fs!=atp){ p_ups(g_pipe,0x00000002 /* FRAGMENT_SHADER_BIT */,atp); g_pipe_fs=atp; } }
   else glUseProgram(p->p);
+  dlg_jitter(r);
   TM(TM_STATE,apply_state(ch));
   lighting_payload(fs);
   /* Targeted diagnostic for Metroid Dread's deferred lighting shader only.
@@ -2130,6 +2327,12 @@ void r3d_draw_gl(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count
   TM(TM_CB,(upload_cbufs(0,vs), upload_cbufs(4,fs)));
   TM(TM_GB,(bind_gbufs(0,vs), bind_gbufs(4,fs)));
   TM(TM_TEX,(bind_textures(ch,0,vs), bind_textures(ch,4,fs)));
+  dlg_draw();
+  if(g_dlg.need && dlg_eval()){   /* DLSS ran before this draw: its framebuffer, program and state again */
+    bind_framebuffer(ch);
+    if(g_sep>0){ glUseProgram(0); p_bpp(g_pipe); g_pipe_on=1; p_ups(g_pipe,0x00000001,vpp); g_pipe_vs=vpp; p_ups(g_pipe,0x00000002,atp); g_pipe_fs=atp; }
+    else glUseProgram(p->p);
+    dlg_jitter(r); apply_state(ch); mb_reset(); TM(TM_TEX,(bind_textures(ch,0,vs), bind_textures(ch,4,fs))); }
   if(g_diag_draws>0 && g_rt[0] && g_rt[0]->w>=640){ g_diag_draws--; capture_draw(ch,indexed,first,count);
     float vt[6]; memcpy(vt,&r[0x280],24);
     LOG("draw %llu: vs %016llx fs %016llx rt0 %ux%u fmt=%x zt=%s count=%u inst=%u topo=%u\n",(unsigned long long)g_draws,(unsigned long long)vs->hash,(unsigned long long)fs->hash,
@@ -2192,13 +2395,17 @@ void r3d_draw_gl(GpuChannel* ch, int indexed, u32 topology, u32 first, u32 count
       glDrawElementsInstancedBaseVertexBaseInstance(GL_TRIANGLES,nq*6,GL_UNSIGNED_INT,0,instances,(GLint)base_vertex,base_instance);
     } else {
       buf_cached(GL_ELEMENT_ARRAY_BUFFER,ia+(u64)first*isz,(u64)count*isz);   /* just this draw's range */
+      int cap=dlg_capture_begin(r,vs,mode,(int)topology,1,first,count,base_vertex,instances);
       glDrawElementsInstancedBaseVertexBaseInstance(mode,count,it,(void*)0,instances,(GLint)base_vertex,base_instance);
+      if(cap) dlg_capture_end();
     }
   } else {
     if(topology==7){ u32 nq=count/4; u32* idx=malloc((size_t)nq*24+4); for(u32 k=0;k<nq;k++){ u32 b=first+k*4; u32 t6[6]={b,b+1,b+2,b,b+2,b+3}; memcpy(idx+k*6,t6,24); }
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,g_ibuf); glBufferData(GL_ELEMENT_ARRAY_BUFFER,(GLsizeiptr)nq*24,idx,GL_STREAM_DRAW); free(idx);
       glDrawElementsInstancedBaseVertexBaseInstance(GL_TRIANGLES,nq*6,GL_UNSIGNED_INT,0,instances,0,base_instance); }
-    else glDrawArraysInstancedBaseInstance(mode,first,count,instances,base_instance);
+    else { int cap=dlg_capture_begin(r,vs,mode,(int)topology,0,first,count,0,instances);
+      glDrawArraysInstancedBaseInstance(mode,first,count,instances,base_instance);
+      if(cap) dlg_capture_end(); }
   }
   g_tm[TM_DRAW]+=plat_ns()-tb0_;
   tr_draw(ch,vs,fs,code+r[0x801+1*0x10],(r[0x800+5*0x10]&1)? code+r[0x801+5*0x10] : 0,indexed,topology,count,instances);
@@ -2838,6 +3045,7 @@ static void prebuild_shaders(void){
       else { trans_ndep=0; trans_overflow=0; g_shader_cb_read=pb_no_cb; src=shader_to_glsl(buf+o,avail,stage,&si); g_shader_cb_read=sh_cb_read;
         if(!src || si.unsupported){ free(src); failed++; continue; }
         src=sh_post(src,stage); translated_save(tk,&si,src); }   /* translated_save skips one that needed constant buffers */
+      if(stage==ST_VS) src=dlg_vs_xfb(src);
       Sh* s=calloc(1,sizeof *s); s->stage=stage; s->hash=h; s->src=src; u64 key=sh_key(s);
       char bp[200]; snprintf(bp,sizeof bp,"shader_cache/%s_s%016llx.bin",g_pc_tag,(unsigned long long)key);
       FILE* t=fopen(bp,"rb");
@@ -3057,7 +3265,7 @@ static void gpu_thread(void* arg){ plat_diag_role("GPU-submit"); t_gpu_thread=1;
       case WK_SUBMIT: g_submit_epoch++; ww_poll(); { extern volatile u64 g_gpu_sub_ns; static u32 fr=~0u; if(fr!=g_frame || !g_gpu_sub_ns){ fr=g_frame; g_gpu_sub_ns=w.sub_ns; } }   /* stamp the whole frame with the time of its first submit */ gpu_submit_now(w.ent,w.n,w.syncpt); cs_kick_async(); free(w.ent); cs_submit_done(w.syncpt,w.incs); break;
       case WK_PRESENT_CPU: trace_note("PRESENT CPU image %dx%d\n",w.w,w.h); present_cpu(w.px,w.w,w.h); free(w.px); g_frame++; gpu_evict_step(); frame_stats(); trace_frame(); break;
       case WK_PRESENT_ADDR: if(!present_addr(w.addr,w.w,w.h)){ extern void vi_convert_cpu(u64 a, u32 w, u32 h, u32 pitch, u32 layout, u32 bhl, u32 fmt, u32* out);
-          u32* px=malloc((size_t)w.w*w.h*4); vi_convert_cpu(w.addr,w.w,w.h,w.n,(w.fmt>>8)&15,(w.fmt>>12)&15,w.fmt&0xFF,px); present_cpu(px,w.w,w.h); free(px); } g_frame++; gpu_evict_step(); frame_stats(); trace_frame(); break;
+          u32* px=malloc((size_t)w.w*w.h*4); vi_convert_cpu(w.addr,w.w,w.h,w.n,(w.fmt>>8)&15,(w.fmt>>12)&15,w.fmt&0xFF,px); present_cpu(px,w.w,w.h); free(px); } g_frame++; dlg_frame(); gpu_evict_step(); frame_stats(); trace_frame(); break;
       case WK_SYNC: pm_lock(&g_ql);__atomic_store_n(w.done,1,__ATOMIC_RELEASE);pc_broadcast(&g_frame_consumed_cv);pm_unlock(&g_ql);break;
       case WK_DUMP: dump_rts(); g_tr_arm=1; break;
       case WK_SHOT: do_screenshot(w.path[0]? w.path : NULL); __atomic_store_n(&g_shot_done,w.n,__ATOMIC_SEQ_CST); break;

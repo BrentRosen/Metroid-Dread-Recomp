@@ -231,7 +231,7 @@ static void page_play() {
     // three tiles
     float w = ImGui::GetContentRegionAvail().x, tw = (w - S(24)) / 3, th = S(108);
     std::string rn = get("renderer"); const char* rl = rn == "vulkan" ? "Vulkan output" : rn == "vulkan_native" ? "Native Vulkan" : "OpenGL";
-    std::string rr = rl; if (rn == "vulkan_native" && getb("dlss")) rr += " + DLAA";
+    std::string rr = rl; if (rn != "vulkan" && getb("dlss")) rr += " + DLAA";
     float rs = (float)atof(get("resolution").c_str()); if (rs <= 0) rs = 1;
     std::string fl = get("fps_limit"); std::string ft = fl == "0" ? "Unlimited" : (fl == "1" || fl.empty()) ? "60 FPS" : fl + " FPS";
     struct T { const char* id; const char* title; std::string value; Page page; } tiles[3] = {
@@ -281,9 +281,9 @@ static void page_graphics() {
     section("RESOLUTION"); resolution_rows(false);
     section("RENDERER"); draw_opt("renderer", get("renderer") == "vulkan_native" ? "EXPERIMENTAL" : nullptr);
 #ifndef SWR_RELEASE   // the public release's renderer has no DLSS
-    if (get("renderer") == "vulkan_native" && file_exists(join(P.exedir, "nvngx_dlss.dll"))) {
+    if (get("renderer") != "vulkan" && file_exists(join(P.exedir, "nvngx_dlss.dll"))) {   // OpenGL and Native Vulkan
         bool v = getb("dlss"); if (row_bool("##dlss", "NVIDIA DLAA anti-aliasing", &v)) set("dlss", v ? "1" : "0");
-        help_text("RTX cards. Uses nvngx_dlss.dll from the game folder (not part of this release).");
+        help_text("RTX cards. Uses nvngx_dlss.dll from the game folder (not part of this release). Applies at the next start.");
     }
 #endif
     section("QUALITY");

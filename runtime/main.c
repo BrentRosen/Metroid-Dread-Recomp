@@ -342,7 +342,7 @@ static void ini_apply(const char* k, const char* v){
     else if(!strcmp(k,"ultrawide")){ extern int g_opt_ultrawide; if(!aspect_given) g_opt_ultrawide=atoi(v); }   /* loader.c: theboy181's 21:9 patch */
     else if(!strcmp(k,"aspect") && *v){ extern int g_opt_ultrawide;   /* aspect=16:9|21:9|16:10; overrides ultrawide= in any order */
       aspect_given=1; g_opt_ultrawide= !strcmp(v,"21:9")? 1 : !strcmp(v,"16:10")? 2 : 0; }
-    else if(!strcmp(k,"dlss")){ extern int snxvk_dlss_mode; snxvk_dlss_mode=atoi(v); }   /* native Vulkan: snxvk/src/nx/gpu/vk/dlss.c */
+    else if(!strcmp(k,"dlss")){ extern int snxvk_dlss_mode; snxvk_dlss_mode=atoi(v); }   /* native Vulkan: snxvk dlss.c; OpenGL: dlss_gl.c + gpu_gl.c dlg_* */
     else if(!strcmp(k,"texture_threads")){ g_opt_tex_threads=atoi(v); if(g_opt_tex_threads<0) g_opt_tex_threads=0; if(g_opt_tex_threads>16) g_opt_tex_threads=16; }
     else if(!strcmp(k,"fast_forward")) g_opt_ff=atoi(v);
     else if(!strcmp(k,"fast_forward_speed")){ g_opt_ff_speed=atoi(v); if(g_opt_ff_speed<2) g_opt_ff_speed=2; if(g_opt_ff_speed>8) g_opt_ff_speed=8; }
@@ -387,7 +387,7 @@ static const IniOpt INI_GRAPHICS[]={
   {"shadows","1","0 = disable shadow maps (more FPS)"},
   {"renderer","opengl","opengl, or vulkan = the game still renders with OpenGL but Vulkan puts the frames on screen\n;   (falls back to OpenGL output if the GPU driver can't share images between the two; restart required),\n;   or vulkan_native = EXPERIMENTAL native Vulkan renderer from ScarletNX (GPL-3.0; falls back to OpenGL if it can't start)"},
 #ifndef SWR_RELEASE   /* the public release: no DLSS (GPL) and no frame generation in that build */
-  {"dlss","0","1 = NVIDIA DLAA anti-aliasing (renderer=vulkan_native only, RTX GPU, nvngx_dlss.dll in the game folder):\n;   DLSS at the internal resolution with the game's own motion vectors; the HUD is untouched. 0 = off"},
+  {"dlss","0","1 = NVIDIA DLAA anti-aliasing (renderer=opengl or vulkan_native, RTX GPU, nvngx_dlss.dll in the game folder):\n;   DLSS at the internal resolution with the game's own motion vectors; the HUD is untouched. 0 = off"},
 #endif
   {NULL,NULL,NULL}};
 static const IniOpt INI_PERF[]={
