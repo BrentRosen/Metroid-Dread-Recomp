@@ -34,6 +34,7 @@ static Nav g_nav; static PadState g_pad; static PromptStyle g_prompts = PROMPT_A
 static std::string g_flash; static double g_flash_t;
 static SetupJob g_job; enum SetupStep { SS_WELCOME, SS_RUNNING, SS_FAILED, SS_DONE } ; static SetupStep g_ss = SS_WELCOME;
 static bool g_restart_after_setup, g_do_restart;   // updates: start the new EXE after the rebuild / now
+static bool g_first_install;   // the game was not compiled when this screen opened: settings are picked after setup
 static std::vector<OldInstall> g_old; static bool g_mig_settings = true, g_mig_saves = true, g_mig_mods = true, g_mig_caches = true;
 static std::string g_mig_report;
 static Hardware g_hw; static bool g_hw_done;
@@ -130,6 +131,38 @@ static void controller_status_card() {
     if (row_button("##ctlcfg", "Controller settings", "CONFIGURE")) go(PG_CONTROLS);
 }
 
+// ---------------------------------------------------------------- settings picked for this PC (Play screen AUTO-SET, Advanced,
+// and once after first-time setup when nothing was brought over from an older installation)
+struct Rec { float res = 1; std::string fps, af, asp, sharp, summary, note; };
+static Rec recommend() {
+    if (!g_hw_done) { g_hw = detect_hardware(); g_hw_done = true; }
+    Rec r; float ratio = (float)g_hw.w / std::max(1, g_hw.h);
+    r.asp = ratio >= 2.2f ? "21:9" : fabsf(ratio - 1.6f) < 0.02f ? "16:10" : "16:9";
+    float base = game_base_h(true, r.asp.c_str()), native = roundf(g_hw.h / base * 20) / 20;
+    r.res = g_hw.tier == "high" ? (g_hw.h >= 2000 ? native : std::max(native, 2.0f)) : g_hw.tier == "mid" ? std::min(native, 1.5f) : 1.0f;
+    r.fps = g_hw.hz >= 230 && g_hw.tier == "high" && g_hw.cores >= 8 ? "240" : g_hw.hz >= 140 && g_hw.tier != "low" ? "144" : g_hw.hz >= 115 && g_hw.tier != "low" ? "120" : "1";
+    r.af = g_hw.tier != "low" ? "16" : "4";
+    r.sharp = base * r.res < g_hw.h - 1 ? "25" : "0";   // the picture is stretched to the screen: a light sharpen
+    r.summary = fmt("Resolution %s, %s, picture %s, anisotropic filtering %s\xC3\x97%s, OpenGL, fullscreen.",
+                    res_text(r.res, true, r.asp.c_str()).c_str(), r.fps == "1" ? "60 FPS" : (r.fps + " FPS").c_str(), r.asp.c_str(), r.af.c_str(),
+                    r.sharp != "0" ? ", light sharpening" : "");
+    if (g_hw.ram_gb && g_hw.ram_gb < 8) r.note = fmt("This PC has %d GB of memory; the game needs about 4 GB, so 8 GB is recommended. Close other programs before playing.", g_hw.ram_gb);
+#ifndef SWR_RELEASE   // the public release has no DLSS
+    else if (g_hw.rtx) r.note = "Optional: Graphics > Native Vulkan + NVIDIA DLAA gives the cleanest edges on RTX cards (experimental renderer).";
+#endif
+    return r;
+}
+static void apply_rec(const Rec& r) {
+    set("docked", "1"); set("fullscreen", "1"); set("resolution", fmt("%g", r.res)); set("fps_limit", r.fps); set("renderer", "opengl"); set("aspect", r.asp);
+    set("anisotropy", r.af); set("sharpening", r.sharp); set("sleep_waits", "1"); set("texture_threads", "0"); set("prebuild_shaders", "1"); set("loading_60fps", "1");
+    set("auto_set", "1");
+}
+static std::string hw_line() {
+    if (!g_hw_done) { g_hw = detect_hardware(); g_hw_done = true; }
+    return fmt("%s%s  \xC2\xB7  %d\xC3\x97%d at %d Hz  \xC2\xB7  %d CPU threads%s", g_hw.gpu.c_str(), g_hw.integrated ? " (integrated)" : "", g_hw.w, g_hw.h, g_hw.hz, g_hw.cores,
+               g_hw.ram_gb ? fmt("  \xC2\xB7  %d GB memory", g_hw.ram_gb).c_str() : "");
+}
+
 // ---------------------------------------------------------------- setup screens
 static std::string g_base, g_update;
 static void setup_screen(ImVec2 a, ImVec2 b) {
@@ -177,6 +210,10 @@ static void setup_screen(ImVec2 a, ImVec2 b) {
         if (done && !running && g_ss == SS_RUNNING) {
             g_ss = SS_DONE; g_focus_first = true;
             if (!g_old.empty()) { MigrateResult m = migrate(g_old[0], g_mig_settings, g_mig_saves, g_mig_mods, g_mig_caches); g_mig_report = m.text; g_ini.load(P.ini); }
+            if (g_first_install && !g_restart_after_setup && (g_old.empty() || !g_mig_settings) && g_ini.get("auto_set", "").empty()) {
+                Rec r = recommend(); apply_rec(r); g_ini.save(); g_ini_dirty = false;   // CONTINUE reloads the .ini from disk
+                g_mig_report += (g_mig_report.empty() ? "" : "\n") + std::string("Settings picked for this PC: ") + r.summary + " Change them any time, or use AUTO-SET on the Play screen.";
+            }
         }
         if (failed && !running && g_ss == SS_RUNNING) { g_ss = SS_FAILED; g_focus_first = true; }
         page_title(g_ss == SS_DONE ? "SETUP COMPLETE" : g_ss == SS_FAILED ? "SETUP STOPPED" : "BUILDING METROID DREAD",
@@ -283,6 +320,14 @@ static void page_play() {
         dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 1.15f, {q.x + S(16), q.y + S(44)}, C_TEXT, tiles[i].value.c_str());
         dl->AddText(ImGui::GetFont(), ImGui::GetFontSize() * 0.7f, {q.x + S(16), q.y + th - S(26)}, f ? C_RED : C_CYAN_DIM, "CHANGE  \xE2\x96\xB8");
         if (c || (f && g_row.confirm)) go(tiles[i].page);
+    }
+    section("BEST SETTINGS FOR THIS PC");
+    {
+        Rec r = recommend();
+        row_text("Detected", hw_line().c_str());
+        if (row_button("##auto", "Not sure what to pick? Choose the best settings for this PC", "AUTO-SET", true)) { apply_rec(r); flash("Settings picked for this PC: " + r.summary); }
+        help_text((r.summary + " Anything can still be changed afterwards.").c_str());
+        if (!r.note.empty()) help_text(r.note.c_str());
     }
     controller_status_card();
     section("SAVES");
@@ -480,24 +525,12 @@ static void page_mods() {
 static void page_advanced() {
     page_title("ADVANCED", "Shaders, CPU, memory, diagnostics and recommendations.");
     section("RECOMMENDED FOR THIS PC");
-    if (!g_hw_done) { g_hw = detect_hardware(); g_hw_done = true; }
-    row_text("Detected", fmt("%s  \xC2\xB7  %d\xC3\x97%d at %d Hz  \xC2\xB7  %d CPU threads", g_hw.gpu.c_str(), g_hw.w, g_hw.h, g_hw.hz, g_hw.cores).c_str());
     {
-        float ratio = (float)g_hw.w / std::max(1, g_hw.h);
-        std::string asp = ratio >= 2.2f ? "21:9" : fabsf(ratio - 1.6f) < 0.02f ? "16:10" : "16:9";
-        float native = roundf(g_hw.h / game_base_h(true, asp.c_str()) * 20) / 20;
-        float res = g_hw.tier == "high" ? (g_hw.h >= 2000 ? native : std::max(native, 2.0f)) : g_hw.tier == "mid" ? std::min(native, 1.5f) : 1.0f;
-        std::string fps = g_hw.hz >= 230 && g_hw.tier == "high" && g_hw.cores >= 8 ? "240" : g_hw.hz >= 140 && g_hw.tier != "low" ? "144" : g_hw.hz >= 115 && g_hw.tier != "low" ? "120" : "1";
-        std::string af = g_hw.tier != "low" ? "16" : "4";
-        std::string txt = fmt("Resolution %s, %s, picture %s, anisotropic filtering %s\xC3\x97, OpenGL, fullscreen, docked, shaders built before playing, 60 FPS loading screens.",
-                              res_text(res, true, asp.c_str()).c_str(), fps == "1" ? "60 FPS" : (fps + " FPS").c_str(), asp.c_str(), af.c_str());
-        help_text(txt.c_str());
-        if (row_button("##rec", "Apply the recommended settings", "APPLY", true)) {
-            set("docked", "1"); set("fullscreen", "1"); set("resolution", fmt("%g", res)); set("fps_limit", fps); set("renderer", "opengl"); set("aspect", asp);
-            set("anisotropy", af); set("sleep_waits", "1"); set("texture_threads", "0"); set("prebuild_shaders", "1"); set("loading_60fps", "1");
-            flash("Recommended settings applied");
-        }
-        if (g_hw.rtx) help_text("Optional: Graphics > Native Vulkan + NVIDIA DLAA gives the cleanest edges on RTX cards (experimental renderer).");
+        Rec r = recommend();
+        row_text("Detected", hw_line().c_str());
+        help_text((r.summary + " Also: docked, shaders built before playing, 60 FPS loading screens.").c_str());
+        if (row_button("##rec", "Apply the recommended settings", "APPLY", true)) { apply_rec(r); flash("Recommended settings applied"); }
+        if (!r.note.empty()) help_text(r.note.c_str());
     }
     section("SHADERS"); draw_opt("wait_for_shaders"); draw_opt("prebuild_shaders"); draw_opt("low_priority_shader_compiler");
     section("CPU"); draw_opt("sleep_waits"); draw_opt("texture_threads");
@@ -663,6 +696,12 @@ static void test_tick() {
     if (pf && g_ss == SS_DONE) { g_ini.load(P.ini); g_page = PG_PLAY; g_play = true; }
     if (as && g_ss == SS_FAILED && !g_job.running && getenv("SWR_FE_QUIT_ON_FAIL")) g_quit = true;
     if (ef && g_frame_no >= atoi(ef)) g_quit = true;
+    if (getenv("SWR_FE_AUTOSET") && g_frame_no == 30) {   // presses AUTO-SET, writes what was detected and picked, then quits
+        Rec r = recommend(); apply_rec(r); g_ini.save(); g_ini_dirty = false;
+        const char* rp = getenv("SWR_FE_RESULT"); FILE* f = rp ? fopen(rp, "a") : nullptr;
+        if (f) { fprintf(f, "autoset tier=%s detected=%s | picked=%s | note=%s\n", g_hw.tier.c_str(), hw_line().c_str(), r.summary.c_str(), r.note.c_str()); fclose(f); }
+        g_quit = true;
+    }
     if (getenv("SWR_FE_UNDO")) {   // presses UNDO once, writes what it said to the result file, then quits
         static int done; if (!done) { done = 1; std::string m; bool rb = false, rs = false; bool ok = update_rollback(&m, &rb, &rs);
             const char* rp = getenv("SWR_FE_RESULT"); FILE* f = rp ? fopen(rp, "a") : nullptr;
@@ -720,10 +759,12 @@ extern "C" int fe_run(void* hwnd) {
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
     g_ini.load(P.ini); if (g_ini.path.empty()) g_ini.path = P.ini;
     g_old = find_old_installs();
+    if (g_test && getenv("SWR_FE_NO_OLD")) g_old.clear();   // tests: a PC with no earlier installation
     g_base = g_ini.get("setup_base", ""); g_update = g_ini.get("setup_update", "");
     bindings_from_string(g_ini.get("launcher_bindings", "1,0,6,7,10").c_str(), g_nav.bind); memcpy(g_old_bind, g_nav.bind, sizeof g_old_bind);
     g_nav.enabled = g_ini.get("launcher_nav", "1") != "0"; g_prompts = prompt_style_from(g_ini.get("launcher_prompts", "auto").c_str());
-    GameCheck gc = check_installed(); g_page = (gc.code_ok && gc.data_ok) ? PG_PLAY : PG_SETUP;
+    GameCheck gc = check_installed(); g_page = (gc.code_ok && gc.data_ok) ? PG_PLAY : PG_SETUP; g_first_install = !gc.code_ok;
+    if (g_test && getenv("SWR_FE_PAGE") && g_page != PG_SETUP) { int pg = atoi(getenv("SWR_FE_PAGE")); if (pg > PG_SETUP && pg < PG_COUNT) g_page = (Page)pg; }   // screenshots
     // a 16:10 window on the primary screen, centred; fullscreen if the game will be
     RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
     int ww = std::min(1440, (int)((wa.right - wa.left) * 0.85f)), wh = std::min((int)(ww * 0.625f), (int)((wa.bottom - wa.top) * 0.9f));

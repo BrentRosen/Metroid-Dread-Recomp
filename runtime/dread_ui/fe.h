@@ -120,7 +120,10 @@ void pads_rumble(int percent);
 void pads_rumble_off();
 
 // ---------------------------------------------------------------- hardware recommendation
-struct Hardware { std::string gpu; int w = 1920, h = 1080, hz = 60, cores = 4; std::string tier; bool rtx = false; };
+struct Hardware {
+    std::string gpu; int w = 1920, h = 1080, hz = 60, cores = 4; std::string tier; bool rtx = false;
+    int vram_mb = 0, ram_gb = 0; bool integrated = false;   // integrated: under 1 GB of dedicated video memory
+};
 Hardware detect_hardware();
 
 } // namespace fe

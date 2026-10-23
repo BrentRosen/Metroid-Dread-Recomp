@@ -494,23 +494,39 @@ void pads_rumble(int pct) {
 void pads_rumble_off() { if (xset) for (DWORD i = 0; i < 4; i++) { WORD m[2] = {0, 0}; xset(i, m); } if (s_ok && s_rumble) for (int i = 0; i < s_n; i++) s_rumble(s_pad[i], 0, 0, 0); }
 
 // ---------------------------------------------------------------- hardware
+// one graphics adapter: keeps it in h if it ranks above what was seen so far (the best card of the PC is what plays)
+static void consider_gpu(Hardware& h, int& best, const std::string& n, int vram) {
+    std::string u = n; for (auto& c : u) c = (char)toupper((unsigned char)c);
+    auto has = [&](const char* s) { return u.find(s) != std::string::npos; };
+    // integrated graphics (Intel UHD / Iris / Arc in a CPU, AMD Radeon 780M and other APUs) share system memory
+    bool igpu = vram < 1024 || has("780M") || has("760M") || has("680M") || has("890M") || has("880M") || has("RADEON(TM) GRAPHICS") || (has("VEGA") && !has("RX VEGA"));
+    int rank = igpu ? 1
+             : (has("RX 64") || has("RX 65")) ? 2   // entry-level RDNA2 cards
+             : (has("RTX 50") || has("RTX 40") || has("RTX 30") || has("RX 9") || has("RX 7") || has("RX 6")) ? 3
+             : (has("RTX 20") || has("GTX 16") || has("GTX 10") || has("RX 5") || has("ARC")) ? 2
+             : (has("NVIDIA") || has("RADEON RX")) ? 2 : 1;
+    if (rank > best) { best = rank; h.gpu = n; h.tier = rank == 3 ? "high" : rank == 2 ? "mid" : "low"; h.rtx = has("RTX") && has("NVIDIA"); h.vram_mb = vram; h.integrated = igpu; }
+}
 Hardware detect_hardware() {
-    Hardware h; h.cores = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    Hardware h; int best = -1;
+    const char* fake = getenv("SWR_FE_TEST") ? getenv("SWR_FE_FAKE_HW") : nullptr;   // tests: "gpu name|w|h|hz|cores|vram MB|ram GB"
+    if (fake) {
+        std::string s = fake; std::vector<std::string> v; size_t p = 0; for (;;) { size_t e = s.find('|', p); v.push_back(s.substr(p, e == std::string::npos ? std::string::npos : e - p)); if (e == std::string::npos) break; p = e + 1; }
+        if (v.size() == 7) { h.w = atoi(v[1].c_str()); h.h = atoi(v[2].c_str()); h.hz = atoi(v[3].c_str()); h.cores = atoi(v[4].c_str()); consider_gpu(h, best, v[0], atoi(v[5].c_str())); h.ram_gb = atoi(v[6].c_str()); return h; }
+    }
+    h.cores = (int)GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
     DEVMODEW dm = {}; dm.dmSize = sizeof dm;
     if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm)) { h.w = (int)dm.dmPelsWidth; h.h = (int)dm.dmPelsHeight; h.hz = (int)dm.dmDisplayFrequency; }
-    IDXGIFactory1* f = nullptr; int best = -1;
+    IDXGIFactory1* f = nullptr;
     if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&f))) {
         IDXGIAdapter1* a; for (UINT i = 0; f->EnumAdapters1(i, &a) != DXGI_ERROR_NOT_FOUND; i++) {
             DXGI_ADAPTER_DESC1 d; a->GetDesc1(&d); a->Release(); if (d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
-            std::string n = utf8(d.Description); std::string u = n; for (auto& c : u) c = (char)toupper((unsigned char)c);
-            int rank = (u.find("RTX 50") != std::string::npos || u.find("RTX 40") != std::string::npos || u.find("RTX 30") != std::string::npos || u.find("RX 9") != std::string::npos || u.find("RX 7") != std::string::npos || u.find("RX 6") != std::string::npos) ? 3
-                     : (u.find("RTX 20") != std::string::npos || u.find("GTX 16") != std::string::npos || u.find("GTX 10") != std::string::npos || u.find("RX 5") != std::string::npos || u.find("ARC") != std::string::npos) ? 2
-                     : (u.find("NVIDIA") != std::string::npos || u.find("RADEON RX") != std::string::npos) ? 2 : 1;
-            if (rank > best) { best = rank; h.gpu = n; h.tier = rank == 3 ? "high" : rank == 2 ? "mid" : "low"; h.rtx = u.find("RTX") != std::string::npos && u.find("NVIDIA") != std::string::npos; }
+            consider_gpu(h, best, utf8(d.Description), (int)(d.DedicatedVideoMemory >> 20));
         }
         f->Release();
     }
     if (h.gpu.empty()) { h.gpu = "unknown graphics card"; h.tier = "low"; }
+    MEMORYSTATUSEX ms = {sizeof ms}; if (GlobalMemoryStatusEx(&ms)) h.ram_gb = (int)((ms.ullTotalPhys + (1ull << 30) - 1) >> 30);   // Windows reports a little less than is fitted: round up
     return h;
 }
 

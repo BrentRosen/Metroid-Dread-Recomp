@@ -10,6 +10,8 @@ One Windows EXE that sets up, configures and runs a native PC build of **your ow
 It is the SwitchRecomp runtime (by MZ Labs) with a Metroid Dread front end built in: first-run setup that compiles
 the game with a bundled GCC, a Play / settings screen, and an in-game menu (F1 or the Home / Guide button).
 
+![The Play screen](docs/images/play-screen.png)
+
 **No Nintendo files are in this repository**: no game code, no RomFS, no keys, no generated C.
 
 - `dread/dread_v210_patches.json` holds small anchored edits that setup applies to the C it generates from the player's ExeFS.
@@ -45,7 +47,17 @@ SHA-256 before anything is replaced, and the replaced files are kept so **UNDO**
 changed, the game is rebuilt from the files setup already installed, without asking for your game folder again.
 Saves, settings and mods are never touched. It can be switched off on the Play screen.
 
+**Not sure which settings to pick?** Press **AUTO-SET** on the Play screen. It reads your graphics card, screen and
+memory and picks resolution, frame rate and quality to match; a new installation gets these automatically after
+setup. Anything can still be changed afterwards.
+
 Found a bug? See [CONTRIBUTING.md](CONTRIBUTING.md): please attach the `.log`.
+
+## Screenshots
+
+| Graphics settings | Controls |
+|---|---|
+| ![Graphics settings](docs/images/graphics-settings.png) | ![Controls](docs/images/controls.png) |
 
 ## Build from source (Windows)
 
