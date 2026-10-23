@@ -39,6 +39,14 @@ A RomFS dump on its own is not enough. Choose the folder that holds both; they c
 folder with one folder per title is fine). If you have the base game and the update as separate dumps, choose the
 update as "Update folder". Every RomFS file is checked against the 2.1.0 file list before anything is compiled.
 
+**Updates**: the Play screen checks this repository's releases and offers **UPDATE** when there is a
+new version. Only the game's own files that changed are downloaded (a few MB), each one is checked against its
+SHA-256 before anything is replaced, and the replaced files are kept so **UNDO** can go back. If the game-code patches
+changed, the game is rebuilt from the files setup already installed, without asking for your game folder again.
+Saves, settings and mods are never touched. It can be switched off on the Play screen.
+
+Found a bug? See [CONTRIBUTING.md](CONTRIBUTING.md): please attach the `.log`.
+
 ## Build from source (Windows)
 
 The toolchain is **not** in this repository and never was: the paths below are where you put your own downloads.
@@ -48,11 +56,13 @@ The release zip bundles the same GCC and Python so that setup can compile the ga
 - `python\` in the repository root: Python 3.12 for Windows (the embeddable package is enough)
 - glslang 16.6.0 (Vulkan SDK or KhronosGroup release), for the renderer's compute shaders: `GLSLANG=` or on PATH
 
+`build.bat` checks for all three and runs the steps below (`build.bat release X.Y.Z` also packs a release):
+
 ```
 python\python.exe work-profiler\build_imgui.py
 set GLSLANG=<path to glslang.exe 16.6.0> && set SWR_NO_DLSS=1 && python\python.exe work-profiler\build_snxvk2.py
 set SWR_RELEASE=1 && python\python.exe switchrecomp.py --build-runtime --cc gcc
-python\python.exe dread\make_release.py release <empty folder> --exe bin\runtime_win64_win32.exe
+python\python.exe dread\make_release.py release <empty folder> --version X.Y.Z --exe bin\runtime_win64_win32.exe
 ```
 
 The release step also needs `redist\zlib1.dll` (zlib 1.3.1, x64) and `redist\SDL2.dll` (SDL 2.x x64 release), the two

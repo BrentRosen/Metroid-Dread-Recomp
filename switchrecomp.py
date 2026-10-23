@@ -295,7 +295,7 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
     # Metroid Dread front end + in-game menu (Dear ImGui, runtime/dread_ui); prebuilt by work-profiler/build_imgui.py
     imgui = os.path.join(RT, 'imgui', 'libimgui.a')
     frontend = os.path.isfile(imgui) and target_win and backend == 'win32' and not os.environ.get('SWR_NO_FRONTEND')
-    if frontend: srcs += [os.path.join(RT, 'dread_ui', f) for f in ('ui.cpp', 'fe.cpp', 'fe_sys.cpp', 'fe_steam.cpp', 'ov.cpp')]
+    if frontend: srcs += [os.path.join(RT, 'dread_ui', f) for f in ('ui.cpp', 'fe.cpp', 'fe_sys.cpp', 'fe_steam.cpp', 'fe_update.cpp', 'ov.cpp')]
     # Linux (X11): the in-game menu from ImGui's sources (runtime/imgui/src, copied there by build_imgui.py), no Play screen
     overlay = not frontend and backend == 'x11' and os.path.isfile(os.path.join(RT, 'imgui', 'src', 'imgui.cpp')) and not os.environ.get('SWR_NO_FRONTEND')
     if overlay: srcs += [os.path.join(RT, 'dread_ui', f) for f in ('ui.cpp', 'ov.cpp', 'stub_fe.c')] + [os.path.join(RT, 'imgui', 'src', f) for f in ('imgui.cpp', 'imgui_draw.cpp', 'imgui_tables.cpp', 'imgui_widgets.cpp', 'imgui_impl_opengl3.cpp')]
@@ -321,7 +321,7 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
     if target_win:
         cmd += ['-static', '-lgdi32', '-lwinmm', '-luser32', '-lopengl32', '-lcomdlg32', '-lshell32', '-mwindows' if backend == 'win32' else '-mconsole']
         if backend == 'win32': cmd += ['-lmfplat', '-lmfreadwrite', '-lmfuuid', '-lole32']
-        if frontend: cmd += ['-ld3d11', '-ldxgi', '-ld3dcompiler', '-ldwmapi', '-luuid', '-loleaut32', '-lurlmon']
+        if frontend: cmd += ['-ld3d11', '-ldxgi', '-ld3dcompiler', '-ldwmapi', '-luuid', '-loleaut32', '-lurlmon', '-lwinhttp', '-lbcrypt']
     else:
         cmd += ['-lpthread', '-ldl', '-lm', '-rdynamic']
         if backend == 'x11': cmd += ['-lX11', '-lGL']

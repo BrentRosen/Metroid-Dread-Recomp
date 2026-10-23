@@ -93,6 +93,21 @@ bool icon_pack_get(int i, std::string* err);   // downloads it from GameBanana a
 int steam_add_shortcut(const std::string& exe, const std::string& dir, std::string& msg);   // fe_steam.cpp: 1 added, 0 already there, -1 error
 std::string mods_dir();
 
+// ---------------------------------------------------------------- updates from the GitHub releases (fe_update.cpp)
+enum UpStage { UP_IDLE, UP_CHECKING, UP_CURRENT, UP_AVAILABLE, UP_DOWNLOADING, UP_INSTALLED, UP_REBUILD, UP_ERROR };
+struct UpdateState {
+    UpStage stage = UP_IDLE; std::string installed, latest, what, error; float pct = 0; int files = 0;
+    bool rebuild = false;   // a recompiler file changed: the game code must be rebuilt (setup with the game's own _data)
+    bool restart = false;   // the EXE changed: start it again to use it
+};
+std::string installed_version();
+void update_check_async();
+void update_install_async();
+UpdateState update_state();
+std::string update_notes_url();
+bool update_rollback(std::string* msg, bool* rebuild, bool* restart);
+bool update_restart();   // starts the game's EXE again; the caller then exits
+
 // ---------------------------------------------------------------- controllers (front end only; the game has its own)
 struct PadInfo { int index; std::string name; };
 struct PadState { unsigned long long phys = 0; int lx = 0, ly = 0, rx = 0, ry = 0, lt = 0, rt = 0; std::string name; bool sdl = false; };

@@ -1,0 +1,92 @@
+name: Bug report
+description: A crash, a setup error, a graphics or sound problem, or stutter
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please attach the log files: without them most problems can't be found.
+        Never attach game files, keys or saves from someone else.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help.
+    validations:
+      required: true
+  - type: dropdown
+    id: when
+    attributes:
+      label: When does it happen?
+      options:
+        - During first-time setup
+        - When starting the game (Play)
+        - In the menus
+        - While playing
+        - In a cutscene or video
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Play screen > Updates, or the "version" line of update.txt in the game folder
+      placeholder: "0.2.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: renderer
+    attributes:
+      label: Renderer
+      options:
+        - OpenGL
+        - Vulkan output
+        - Native Vulkan
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU
+      placeholder: "e.g. Ryzen 5 5600X / Core i5-1135G7"
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and driver version
+      placeholder: "e.g. RTX 3060, driver 566.36 / Intel Iris Xe"
+    validations:
+      required: true
+  - type: input
+    id: ram
+    attributes:
+      label: RAM
+      placeholder: "e.g. 16 GB"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: "e.g. Windows 11 24H2"
+    validations:
+      required: true
+  - type: checkboxes
+    id: game
+    attributes:
+      label: Game files
+      options:
+        - label: My game files are my own dump of Metroid Dread 2.1.0 (ExeFS and RomFS, update applied)
+          required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Drag in `Metroid Dread.log` from the game folder. For stutter also `performance.txt`; for setup problems
+        `setup.log`. Attach the files rather than pasting them.
+    validations:
+      required: true

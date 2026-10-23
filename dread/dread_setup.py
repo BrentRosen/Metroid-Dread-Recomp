@@ -152,6 +152,18 @@ def assemble_romfs(base_romfs, upd_romfs, dst, pct0, pct1):
             log('RomFS already in place and verified earlier: kept')
             P(pct1, 'Game data', 'already verified')
             return
+    if base_romfs and not upd_romfs and os.path.isdir(dst) and os.path.samefile(base_romfs, dst):
+        # a rebuild after an update (the front end passes the game's own _data folder): check in place, never copy a
+        # file onto itself
+        log('RomFS: checking the installed files in place')
+        bad = [p for p, s, h in rows if not os.path.isfile(os.path.join(dst, p)) or os.path.getsize(os.path.join(dst, p)) != s]
+        if bad:
+            raise Fail('%d installed RomFS files are missing or changed (for example %s). Run setup again with your game folder.'
+                       % (len(bad), ', '.join(bad[:3])))
+        with open(marker, 'w') as f:
+            f.write(mhash)
+        P(pct1, 'Game data', 'checked')
+        return
     # choose a source for every file: the update's when it has it, else the base game's
     src = {}; missing = []; from_update = 0
     for p, s, h in rows:
@@ -293,10 +305,13 @@ def main():
         assemble_romfs(base_romfs, upd_romfs, os.path.join(data, 'romfs'), 2, 22)
 
         ex_dst = os.path.join(data, 'exefs'); os.makedirs(ex_dst, exist_ok=True)
-        for n in os.listdir(exefs):
-            s = os.path.join(exefs, n)
-            if os.path.isfile(s):
-                shutil.copyfile(s, os.path.join(ex_dst, n))
+        if os.path.samefile(exefs, ex_dst):
+            log('ExeFS: the installed copy is used (rebuild)')
+        else:
+            for n in os.listdir(exefs):
+                s = os.path.join(exefs, n)
+                if os.path.isfile(s):
+                    shutil.copyfile(s, os.path.join(ex_dst, n))
         P(23, 'Translating the game code', 'loading')
 
         import switchrecomp, nxloader, codegen   # the SwitchRecomp translator, bundled next to this script
@@ -308,6 +323,14 @@ def main():
             files = sorted(os.path.join(build, f) for f in os.listdir(build) if f.startswith('code_') and f.endswith('.c'))
             files.insert(0, os.path.join(build, 'module.c'))
         else:
+            # regenerating (new patches or translator after an update): remember each file's content, so a file that
+            # comes out the same keeps its date and its compiled object is reused; only changed files are compiled
+            before = {}
+            if os.path.isdir(build):
+                for f in os.listdir(build):
+                    if f.endswith('.c'):
+                        fp = os.path.join(build, f)
+                        before[f] = (hashlib.sha1(open(fp, 'rb').read()).hexdigest(), os.stat(fp).st_mtime_ns)
             mods, npdm, _ = nxloader.load_program(data)
             for m in mods:
                 log('  %-8s %010X  code %.1f MB' % (m.name, m.base, m.text[1] / 1048576.0))
@@ -331,6 +354,13 @@ def main():
             files = switchrecomp.gen_module(prog, mods, npdm, build, name, 30000, say)
             P(30, 'Applying Metroid Dread fixes', '')
             apply_patches(build)
+            kept = 0
+            for f, (h, mt) in before.items():
+                fp = os.path.join(build, f)
+                if os.path.isfile(fp) and hashlib.sha1(open(fp, 'rb').read()).hexdigest() == h:
+                    os.utime(fp, ns=(mt, mt)); kept += 1
+            if before:
+                log('Regenerated: %d of %d files unchanged (their compiled objects are reused)' % (kept, len(files)))
             with open(gen_marker, 'w') as f:
                 f.write(gen_key)
         P(31, 'Compiling with GCC', '0 of %d files' % len(files))

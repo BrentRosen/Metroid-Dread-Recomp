@@ -3,6 +3,7 @@
 // so OpenGL or Vulkan can take it over afterwards: one process, one window.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <shellapi.h>
 #include <d3d11.h>
 #include <objbase.h>
 #include <cstdio>
@@ -32,6 +33,7 @@ static Page g_page = PG_PLAY; static bool g_page_changed = true;
 static Nav g_nav; static PadState g_pad; static PromptStyle g_prompts = PROMPT_AUTO;
 static std::string g_flash; static double g_flash_t;
 static SetupJob g_job; enum SetupStep { SS_WELCOME, SS_RUNNING, SS_FAILED, SS_DONE } ; static SetupStep g_ss = SS_WELCOME;
+static bool g_restart_after_setup, g_do_restart;   // updates: start the new EXE after the rebuild / now
 static std::vector<OldInstall> g_old; static bool g_mig_settings = true, g_mig_saves = true, g_mig_mods = true, g_mig_caches = true;
 static std::string g_mig_report;
 static Hardware g_hw; static bool g_hw_done;
@@ -199,7 +201,8 @@ static void setup_screen(ImVec2 a, ImVec2 b) {
         } else if (g_ss == SS_DONE) {
             ImGui::Dummy({1, S(8)});
             if (!g_mig_report.empty()) help_text(g_mig_report.c_str());
-            if (big_button("##cont", "CONTINUE", {S(320), S(64)})) { g_ini.load(P.ini); go(PG_PLAY); }
+            if (big_button("##cont", g_restart_after_setup ? "RESTART" : "CONTINUE", {S(320), S(64)})) {
+                if (g_restart_after_setup) { g_do_restart = true; g_quit = true; } else { g_ini.load(P.ini); go(PG_PLAY); } }
         } else {
             if (row_button("##cancel", "Stop setup (you can continue it later)", "CANCEL")) setup_cancel(g_job);
         }
@@ -216,6 +219,40 @@ static void setup_screen(ImVec2 a, ImVec2 b) {
     ImGui::End();
 }
 
+// ---------------------------------------------------------------- updates (fe_update.cpp)
+// the game code is rebuilt from what setup already installed (the _data folder has the verified exefs and romfs)
+static void start_rebuild(bool restart_after) {
+    g_job = SetupJob(); g_job.base = P.data; g_job.t0 = ImGui::GetTime(); g_restart_after_setup = restart_after;
+    g_ss = setup_start(g_job) ? SS_RUNNING : SS_FAILED; go(PG_SETUP);
+}
+// banner: only when there is something to do; otherwise the full UPDATES section on the Play page
+static void update_rows(bool banner) {
+    UpdateState u = update_state();
+    std::string have = u.installed.empty() ? std::string("an older version") : u.installed;
+    switch (u.stage) {
+    case UP_AVAILABLE:
+        if (row_button("##upd", fmt("Version %s is available (you have %s)", u.latest.c_str(), have.c_str()).c_str(), "UPDATE", true)) update_install_async();
+        if (row_button("##updn", "What's new in it", "OPEN")) ShellExecuteW(nullptr, L"open", wide(update_notes_url()).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (!banner) help_text("Only the files that changed are downloaded, each one is checked before anything is replaced, and the "
+                               "replaced files are kept so you can go back. Your saves and settings are not touched.");
+        break;
+    case UP_DOWNLOADING:
+        progress_bar(u.pct / 100.0f, {ImGui::GetContentRegionAvail().x, S(40)}, fmt("%s  —  %.0f%%", u.what.c_str(), u.pct).c_str());
+        break;
+    case UP_INSTALLED:
+        if (u.restart) { if (row_button("##updr", fmt("Version %s is installed. Restart to use it", u.installed.c_str()).c_str(), "RESTART", true)) { g_do_restart = true; g_quit = true; } }
+        else if (!banner) row_text("Update", fmt("Version %s is installed (%d files)", u.installed.c_str(), u.files).c_str(), C_OK);
+        break;
+    case UP_REBUILD:
+        if (row_button("##updb", fmt("Version %s is installed. The game code must be rebuilt (a few minutes)", u.installed.c_str()).c_str(), "REBUILD", true)) start_rebuild(u.restart);
+        break;
+    case UP_ERROR: if (!banner) row_text("Update", u.error.c_str(), C_WARN); break;
+    case UP_CHECKING: if (!banner) row_text("Update", "Checking..."); break;
+    case UP_CURRENT: if (!banner) row_text("Version", fmt("%s (the newest)", u.installed.c_str()).c_str(), C_OK); break;
+    default: if (!banner) row_text("Version", have.c_str()); break;
+    }
+}
+
 // ---------------------------------------------------------------- pages
 static void page_play() {
     ImDrawList* dl = ImGui::GetWindowDrawList(); ImVec2 p = ImGui::GetCursorScreenPos();
@@ -228,6 +265,7 @@ static void page_play() {
     ImGui::Dummy({1, S(8)});
     if (big_button("##play", "PLAY", {S(420), S(86)})) { if (ready) g_play = true; else go(PG_SETUP); }
     ImGui::Dummy({1, S(14)});
+    { UpStage st = update_state().stage; if (st == UP_AVAILABLE || st == UP_DOWNLOADING || st == UP_REBUILD || (st == UP_INSTALLED && update_state().restart)) { update_rows(true); ImGui::Dummy({1, S(10)}); } }
     // three tiles
     float w = ImGui::GetContentRegionAvail().x, tw = (w - S(24)) / 3, th = S(108);
     std::string rn = get("renderer"); const char* rl = rn == "vulkan" ? "Vulkan output" : rn == "vulkan_native" ? "Native Vulkan" : "OpenGL";
@@ -257,6 +295,14 @@ static void page_play() {
     if (row_button("##steam", "Add Metroid Dread to Steam as a non-Steam game", "ADD")) {
         std::string m; steam_add_shortcut(P.exe, P.exedir, m); flash(m); }
     help_text("Uses this game's icon. Steam is closed and started again if it's running.");
+    section("UPDATES");
+    update_rows(false);
+    { UpStage st = update_state().stage; if (st != UP_CHECKING && st != UP_DOWNLOADING && st != UP_AVAILABLE && row_button("##updc", "Check for a new version now", "CHECK")) update_check_async(); }
+    { bool v = get("check_updates") != "0"; if (row_bool("##updauto", "Check for a new version when this screen opens", &v)) set("check_updates", v ? "1" : "0"); }
+    if (dir_exists(join(P.exedir, "update_backup")) && row_button("##updu", "Go back to the version before the last update", "UNDO")) {
+        std::string m; bool rb = false, rs = false;
+        if (update_rollback(&m, &rb, &rs)) { flash(m); if (rb) start_rebuild(rs); else if (rs) { g_do_restart = true; g_quit = true; } } else flash(m); }
+    help_text("Updates come from this project's GitHub releases page and only replace this game's own files.");
     section("FOLDERS");
     if (row_button("##gf", "Game folder", "OPEN")) open_in_explorer(P.exedir);
     if (row_button("##sc", "Screenshots and recordings", "OPEN")) { make_dirs(join(P.exedir, "captures")); open_in_explorer(join(P.exedir, "captures")); }
@@ -617,14 +663,27 @@ static void test_tick() {
     if (pf && g_ss == SS_DONE) { g_ini.load(P.ini); g_page = PG_PLAY; g_play = true; }
     if (as && g_ss == SS_FAILED && !g_job.running && getenv("SWR_FE_QUIT_ON_FAIL")) g_quit = true;
     if (ef && g_frame_no >= atoi(ef)) g_quit = true;
+    if (getenv("SWR_FE_UNDO")) {   // presses UNDO once, writes what it said to the result file, then quits
+        static int done; if (!done) { done = 1; std::string m; bool rb = false, rs = false; bool ok = update_rollback(&m, &rb, &rs);
+            const char* rp = getenv("SWR_FE_RESULT"); FILE* f = rp ? fopen(rp, "a") : nullptr;
+            if (f) { fprintf(f, "undo ok=%d rebuild=%d restart=%d installed=%s msg=%s\n", ok, rb, rs, installed_version().c_str(), m.c_str()); fclose(f); }
+            g_quit = true; } }
+    if (getenv("SWR_FE_AUTOUPDATE")) {   // presses UPDATE, then REBUILD / RESTART, as a player would
+        UpdateState u = update_state();
+        if (u.stage == UP_AVAILABLE) update_install_async();
+        else if (u.stage == UP_REBUILD && g_ss != SS_RUNNING && g_ss != SS_DONE && g_ss != SS_FAILED) start_rebuild(u.restart);
+        else if (u.stage == UP_INSTALLED && u.restart) { g_do_restart = true; g_quit = true; }
+        if (g_ss == SS_DONE && g_restart_after_setup) { g_do_restart = true; g_quit = true; }
+        if ((u.stage == UP_CURRENT || u.stage == UP_ERROR || g_ss == SS_FAILED) && !g_job.running) g_quit = true;   // test over
+    }
     static const char* rp = getenv("SWR_FE_RESULT"); static double last;
     static unsigned last_nav;
     ImGuiContext& gx = *ImGui::GetCurrentContext();
     bool nav_changed = gx.NavId != last_nav; last_nav = gx.NavId;
     if (rp && (ImGui::GetTime() - last >= 1 || g_quit || g_play || nav_changed)) { last = ImGui::GetTime(); FILE* f = fopen(rp, "a");
-        if (f) { setup_lock(); fprintf(f, "frame=%d page=%s setup=%d pct=%.1f stage=%s nav=%08x navwin=%s active=%08x padflags=%d/%d down=%d error=%s\n", g_frame_no, PAGE_NAMES[g_page], (int)g_ss, (float)g_job.pct, g_job.stage.c_str(),
+        if (f) { setup_lock(); fprintf(f, "frame=%d page=%s setup=%d pct=%.1f stage=%s nav=%08x navwin=%s active=%08x padflags=%d/%d down=%d update=%d/%s/%.0f error=%s%s\n", g_frame_no, PAGE_NAMES[g_page], (int)g_ss, (float)g_job.pct, g_job.stage.c_str(),
                      gx.NavId, gx.NavWindow ? gx.NavWindow->Name : "-", gx.ActiveId, (gx.IO.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad) != 0, (gx.IO.BackendFlags & ImGuiBackendFlags_HasGamepad) != 0,
-                     (int)ImGui::IsKeyDown(ImGuiKey_GamepadDpadDown), g_job.error.c_str()); setup_unlock(); fclose(f); } }
+                     (int)ImGui::IsKeyDown(ImGuiKey_GamepadDpadDown), (int)update_state().stage, update_state().installed.c_str(), update_state().pct, g_job.error.c_str(), update_state().error.c_str()); setup_unlock(); fclose(f); } }
 }
 
 } // namespace fe
@@ -680,6 +739,7 @@ extern "C" int fe_run(void* hwnd) {
     load_fonts(io); apply_style(1.0f);
     ImGui_ImplWin32_Init(g_hwnd); ImGui_ImplDX11_Init(g_dev, g_ctx);
     pads_init();
+    if (g_ini.get("check_updates", "1") != "0" && (!g_test || getenv("SWR_UPDATE_URL"))) update_check_async();
     while (!g_quit && !g_play) {
         MSG msg; while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
         if (g_quit || g_play) break;
@@ -703,6 +763,7 @@ extern "C" int fe_run(void* hwnd) {
     pads_shutdown();
     ImGui_ImplDX11_Shutdown(); ImGui_ImplWin32_Shutdown(); ImGui::DestroyContext();
     d3d_shutdown();
+    if (g_do_restart) update_restart();   // an update replaced the EXE: the new one takes over
     if (g_quit) return 1;
     apply_env(g_ini);
     InvalidateRect(g_hwnd, nullptr, FALSE);

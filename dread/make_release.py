@@ -1,6 +1,6 @@
 """Build the Metroid Dread release and the source-only folder.
 
-  make_release.py release OUT_DIR [--exe PATH]   -> OUT_DIR\\Metroid Dread\\ (the game EXE + recompiler + licences) and a .zip
+  make_release.py release OUT_DIR --version X.Y.Z [--exe PATH]   -> OUT_DIR\\Metroid Dread\\ (the game EXE + recompiler + licences) and a .zip
   make_release.py source  OUT_DIR                -> a clean source tree for GitHub (no game files, no generated code, no binaries
                                                     we don't have the right to publish, no DLSS)
 
@@ -104,7 +104,41 @@ def redist(name):
                      'release (github.com/libsdl-org/SDL/releases)' % (name, os.path.join(ROOT, 'redist')))
 
 
-def release(out, exe):
+def update_files(out, version):
+    """update-<version>.zip and update.txt for the release in OUT/Metroid Dread (also: make_release.py update)"""
+    dst = os.path.join(out, 'Metroid Dread')
+    # in-place updates (runtime/dread_ui/fe_update.cpp): every file the release owns except the bundled compiler and
+    # Python, in update-<version>.zip, and update.txt listing each with SHA-256 and size. The installed copy keeps
+    # update.txt as the record of what is installed. Publish update.txt and the update zip as release assets too
+    own = []
+    for dp, dn, fn in os.walk(dst):
+        rel_dir = os.path.relpath(dp, dst).replace(os.sep, '/')
+        if rel_dir.startswith('recompiler/gcc') or rel_dir.startswith('recompiler/python'):
+            continue
+        for n in fn:
+            if rel_dir == '.' and n == 'update.txt': continue   # the manifest itself
+            own.append(n if rel_dir == '.' else rel_dir + '/' + n)
+    own.sort()
+    pkg = 'update-%s.zip' % version
+    pz = os.path.join(out, pkg)
+    with zipfile.ZipFile(pz, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        for r in own:
+            zf.write(os.path.join(dst, r.replace('/', os.sep)), r)
+    def sha(f):
+        with open(f, 'rb') as h:
+            return hashlib.sha256(h.read()).hexdigest()
+    lines = ['# Metroid Dread PC update manifest (make_release.py)', 'version %s' % version, 'tag v%s' % version,
+             'package %s %s %d' % (pkg, sha(pz), os.path.getsize(pz))]
+    for r in own:
+        f = os.path.join(dst, r.replace('/', os.sep))
+        lines.append('file %s %d %s' % (sha(f), os.path.getsize(f), r))
+    for f in (os.path.join(dst, 'update.txt'), os.path.join(out, 'update.txt')):
+        with open(f, 'w', newline='\n') as h:
+            h.write('\n'.join(lines) + '\n')
+    print('update: %s (%.1f MB, %d files) + update.txt' % (pz, os.path.getsize(pz) / 2**20, len(own)))
+
+
+def release(out, exe, version):
     dst = os.path.join(out, 'Metroid Dread')
     if os.path.exists(dst):
         raise SystemExit('%s exists: choose a new folder' % dst)
@@ -131,8 +165,9 @@ def release(out, exe):
         'The 60 FPS cutscene and 21:9 patches are ports of theboy181\'s Metroid Dread v2.1.0 patches\n'
         '(https://github.com/theboy181/switch-ptchtxt-mods); 21:9 commissioned by Nikorasu081.\n')
     open(os.path.join(dst, 'README.txt'), 'w', newline='\r\n').write(README)
+    update_files(out, version)
     # one zip to download
-    z = os.path.join(out, 'MetroidDread-PC-%s.zip' % time.strftime('%Y%m%d'))
+    z = os.path.join(out, 'MetroidDread-PC-v%s.zip' % version)
     with zipfile.ZipFile(z, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for dp, dn, fn in os.walk(dst):
             for n in fn:
@@ -223,7 +258,7 @@ def source(out):
         for ext in ('.cpp', '.h'):
             cp(os.path.join(im, 'backends', f + ext), os.path.join(out, 'third_party', 'imgui-1.92.5', 'backends', f + ext))
     cp(os.path.join(im, 'backends', 'imgui_impl_opengl3_loader.h'), os.path.join(out, 'third_party', 'imgui-1.92.5', 'backends', 'imgui_impl_opengl3_loader.h'))
-    for f in ('build_imgui.py', 'build_snxvk2.py', 'gen_spv_headers.py'):
+    for f in ('build_imgui.py', 'build_snxvk2.py', 'gen_spv_headers.py', 'update_test.py'):
         cp(os.path.join(ROOT, 'work-profiler', f), os.path.join(out, 'work-profiler', f))
     for f in os.listdir(os.path.join(ROOT, 'linux')):
         p = os.path.join(ROOT, 'linux', f)
@@ -238,6 +273,11 @@ def source(out):
     open(os.path.join(out, '.gitattributes'), 'w', newline='\n').write('* -text\n')
     open(os.path.join(out, 'README.md'), 'w', encoding='utf-8').write(SOURCE_README)
     cp(os.path.join(ROOT, 'dread', 'DLSS.md'), os.path.join(out, 'DLSS.md'))
+    # files that only belong in the repository (CONTRIBUTING.md, build.bat, .github issue forms)
+    repo = os.path.join(ROOT, 'dread', 'repo')
+    for dp, dn, fn in os.walk(repo):
+        for n in fn:
+            p = os.path.join(dp, n); cp(p, os.path.join(out, os.path.relpath(p, repo)))
     n = sum(len(fn) for dp, dn, fn in os.walk(out))
     print('source: %s (%d files)' % (out, n))
 
@@ -283,6 +323,14 @@ A RomFS dump on its own is not enough. Choose the folder that holds both; they c
 folder with one folder per title is fine). If you have the base game and the update as separate dumps, choose the
 update as "Update folder". Every RomFS file is checked against the 2.1.0 file list before anything is compiled.
 
+**Updates**: the Play screen checks this repository's releases and offers **UPDATE** when there is a
+new version. Only the game's own files that changed are downloaded (a few MB), each one is checked against its
+SHA-256 before anything is replaced, and the replaced files are kept so **UNDO** can go back. If the game-code patches
+changed, the game is rebuilt from the files setup already installed, without asking for your game folder again.
+Saves, settings and mods are never touched. It can be switched off on the Play screen.
+
+Found a bug? See [CONTRIBUTING.md](CONTRIBUTING.md): please attach the `.log`.
+
 ## Build from source (Windows)
 
 The toolchain is **not** in this repository and never was: the paths below are where you put your own downloads.
@@ -292,11 +340,13 @@ The release zip bundles the same GCC and Python so that setup can compile the ga
 - `python\\` in the repository root: Python 3.12 for Windows (the embeddable package is enough)
 - glslang 16.6.0 (Vulkan SDK or KhronosGroup release), for the renderer's compute shaders: `GLSLANG=` or on PATH
 
+`build.bat` checks for all three and runs the steps below (`build.bat release X.Y.Z` also packs a release):
+
 ```
 python\\python.exe work-profiler\\build_imgui.py
 set GLSLANG=<path to glslang.exe 16.6.0> && set SWR_NO_DLSS=1 && python\\python.exe work-profiler\\build_snxvk2.py
 set SWR_RELEASE=1 && python\\python.exe switchrecomp.py --build-runtime --cc gcc
-python\\python.exe dread\\make_release.py release <empty folder> --exe bin\\runtime_win64_win32.exe
+python\\python.exe dread\\make_release.py release <empty folder> --version X.Y.Z --exe bin\\runtime_win64_win32.exe
 ```
 
 The release step also needs `redist\\zlib1.dll` (zlib 1.3.1, x64) and `redist\\SDL2.dll` (SDL 2.x x64 release), the two
@@ -355,18 +405,27 @@ if __name__ == '__main__':
     if len(sys.argv) < 3:
         raise SystemExit(__doc__)
     if sys.argv[1] == 'release':
-        exe = os.path.join(ROOT, 'bin', 'runtime_win64_win32.exe')
+        exe = os.path.join(ROOT, 'bin', 'runtime_win64_win32.exe'); version = None
         args = sys.argv[3:]
         while args:   # --exe PATH or --exe=PATH (the spaced form was ignored before, which packaged bin\'s EXE)
             a = args.pop(0)
             if a == '--exe' and args: exe = args.pop(0)
             elif a.startswith('--exe='): exe = a[6:]
+            elif a == '--version' and args: version = args.pop(0)
+            elif a.startswith('--version='): version = a[10:]
             else: raise SystemExit('unknown argument: %s' % a)
         # the release EXE has the Play screen and no frame generation (SWR_RELEASE=1 with the front end)
         data = open(exe, 'rb').read()
         if b'RECOMPILED FOR PC' not in data or b'Lossless.dll' in data:
             raise SystemExit('%s is not a release build: build it with SWR_RELEASE=1 (and the front end)' % exe)
-        release(os.path.abspath(sys.argv[2]), exe)
+        if not version or not all(p.isdigit() for p in version.split('.')):
+            raise SystemExit('--version X.Y.Z is required (it names the zips and the update manifest, e.g. --version 0.2.2)')
+        release(os.path.abspath(sys.argv[2]), exe, version)
+    elif sys.argv[1] == 'update':   # remake the update files for an existing release folder: update OUT_DIR --version X.Y.Z
+        args = sys.argv[3:]; version = args[1] if len(args) == 2 and args[0] == '--version' else (args[0][10:] if args and args[0].startswith('--version=') else None)
+        if not version or not all(p.isdigit() for p in version.split('.')):
+            raise SystemExit('usage: make_release.py update OUT_DIR --version X.Y.Z')
+        update_files(os.path.abspath(sys.argv[2]), version)
     elif sys.argv[1] == 'source':
         source(os.path.abspath(sys.argv[2]))
     else:
