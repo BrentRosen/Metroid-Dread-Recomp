@@ -52,23 +52,51 @@ def npdm_program_id(path):
     return struct.unpack_from('<Q', d, i + 0x10)[0] if i >= 0 else None
 
 
+def _is_exefs(c):
+    return os.path.isfile(os.path.join(c, 'main')) and os.path.isfile(os.path.join(c, 'main.npdm'))
+
+
+def _is_romfs(c):
+    return os.path.isdir(os.path.join(c, 'system')) or os.path.isdir(os.path.join(c, 'packs')) or os.path.isfile(os.path.join(c, 'config.ini'))
+
+
+def _below(folder, test, depth=3):
+    """folders up to `depth` levels below `folder` (breadth first, so the shallowest wins) that pass `test`.
+    Emulator dumps nest the files (dump/<title id>/romfs, a folder per title, ...)."""
+    level = [folder]
+    for _ in range(depth):
+        nxt = []
+        for d in level:
+            try:
+                subs = sorted(e.path for e in os.scandir(d) if e.is_dir())
+            except OSError:
+                continue
+            for c in subs:
+                if test(c):
+                    return c
+            nxt += subs
+        level = nxt[:400]
+    return None
+
+
 def exefs_in(folder):
-    """the ExeFS inside a chosen folder: the folder itself, or its exefs/ (any case)"""
+    """the ExeFS inside a chosen folder: the folder itself, its exefs/ (any case), or one a few levels down"""
     if not folder:
         return None
     for c in (folder, os.path.join(folder, 'exefs'), os.path.join(folder, 'ExeFS')):
-        if os.path.isfile(os.path.join(c, 'main')) and os.path.isfile(os.path.join(c, 'main.npdm')):
+        if _is_exefs(c):
             return c
-    return None
+    return _below(folder, _is_exefs)
 
 
 def romfs_in(folder):
     if not folder:
         return None
     for c in (os.path.join(folder, 'romfs'), os.path.join(folder, 'RomFS'), folder):
-        if os.path.isdir(os.path.join(c, 'system')) or os.path.isdir(os.path.join(c, 'packs')) or os.path.isfile(os.path.join(c, 'config.ini')):
+        if _is_romfs(c):
             return c
-    return None
+    return (_below(folder, lambda c: os.path.basename(c).lower() == 'romfs' and _is_romfs(c))
+            or _below(folder, _is_romfs))
 
 
 def pick_exefs(base, update):
@@ -88,8 +116,9 @@ def pick_exefs(base, update):
             return ex
         seen.append((what, bid))
     if not seen:
-        raise Fail('No ExeFS found. Choose the folder that contains "exefs" (with the files main and main.npdm) and "romfs", '
-                   'or the exefs folder itself.')
+        raise Fail('No ExeFS found (the files main and main.npdm, looked for up to 3 folders deep). A RomFS dump alone is not '
+                   'enough: the game code is in the ExeFS, which is extracted separately. Extract both the ExeFS and the RomFS of '
+                   'your copy with the 2.1.0 update applied, then choose the folder that holds them.')
     what, bid = seen[0]
     raise Fail('The %s has Metroid Dread, but not version %s (its main has build ID %s). '
                'Most likely this is the base game: also choose the extracted 2.1.0 update as "Update folder", or extract the game '
