@@ -2453,6 +2453,10 @@ static GLuint g_down_prog; static GLint g_down_xf=-1, g_down_px=-1;
 /* px.z = 1: anti-aliasing (ini antialiasing=1), FXAA 3.11 quality (12 taps of edge search) on the game image's own
    texels, on the gamma-encoded values as FXAA expects; only where no supersampling already averages the image */
 int g_opt_aa;
+/* px.w > 0: sharpening (ini sharpening=1..100), contrast-adaptive like AMD CAS: each pixel minus a share of its four
+   neighbours, the share scaled down where the neighbourhood is already near black or white, so no halos or clipping.
+   Neighbours one window pixel away (the picture as it is shown, after downscale or FXAA) */
+int g_opt_sharp;
 static const char* DOWN_FS="#version 430 core\nin vec2 uv; out vec4 o; layout(binding=0) uniform sampler2D t; uniform vec4 px;\n"
   "float L(vec2 p){ return dot(texture(t,p).rgb,vec3(0.299,0.587,0.114)); }\n"
   "vec3 fxaa(vec2 uv){ vec2 rc=1.0/vec2(textureSize(t,0)); vec3 rgbM=texture(t,uv).rgb; float M=dot(rgbM,vec3(0.299,0.587,0.114));\n"
@@ -2475,8 +2479,16 @@ static const char* DOWN_FS="#version 430 core\nin vec2 uv; out vec4 o; layout(bi
   " bool goodN=(eN<0.0)!=mLT0, goodP=(eP<0.0)!=mLT0; float spanLen=dstP+dstN; bool dirN=dstN<dstP; float dst=min(dstN,dstP);\n"
   " bool good=dirN? goodN : goodP; float subG=subF*subF, pxOff=dst*(-1.0/spanLen)+0.5, subH=subG*0.75;\n"
   " float o2=max(good? pxOff : 0.0,subH); vec2 p=uv; if(!horz) p.x+=o2*len; else p.y+=o2*len; return texture(t,p).rgb; }\n"
-  "void main(){ vec2 r=px.xy*vec2(textureSize(t,0)); if(max(r.x,r.y)<=1.05){ o=vec4(px.z>0.5? fxaa(uv) : texture(t,uv).rgb,1.0); return; }\n"
-  " vec3 c=vec3(0.0); for(int j=0;j<4;j++) for(int i=0;i<4;i++) c+=texture(t,uv+((vec2(i,j)+0.5)*0.25-0.5)*px.xy).rgb; o=vec4(c*(1.0/16.0),1.0); }";
+  "vec3 cas(vec3 c,vec3 n,vec3 s,vec3 e,vec3 w,float k){ vec3 mn=min(c,min(min(n,s),min(e,w))), mx=max(c,max(max(n,s),max(e,w)));\n"
+  " vec3 a=sqrt(clamp(min(mn,1.0-mx)/max(mx,vec3(1e-4)),0.0,1.0)); vec3 wt=-a*mix(0.125,0.2,k); return clamp((c+(n+s+e+w)*wt)/(1.0+4.0*wt),0.0,1.0); }\n"
+  "vec3 pick(vec2 p){ vec2 r=px.xy*vec2(textureSize(t,0)); if(max(r.x,r.y)<=1.05) return texture(t,p).rgb;\n"
+  " vec3 c=vec3(0.0); for(int j=0;j<4;j++) for(int i=0;i<4;i++) c+=texture(t,p+((vec2(i,j)+0.5)*0.25-0.5)*px.xy).rgb; return c*(1.0/16.0); }\n"
+  "void main(){ vec2 r=px.xy*vec2(textureSize(t,0)); bool one=max(r.x,r.y)<=1.05;\n"
+  " vec3 c= one&&px.z>0.5? fxaa(uv) : pick(uv);\n"
+  " if(px.w>0.0){ vec2 d=one? 1.0/vec2(textureSize(t,0)) : px.xy;\n"
+  "  vec3 n=texture(t,uv+vec2(0,-d.y)).rgb, s=texture(t,uv+vec2(0,d.y)).rgb, e=texture(t,uv+vec2(d.x,0)).rgb, w=texture(t,uv+vec2(-d.x,0)).rgb;\n"
+  "  c=cas(c,n,s,e,w,px.w); }\n"
+  " o=vec4(c,1.0); }";
 static GLuint g_last_present_tex; static int g_last_flip, g_last_w, g_last_h; static int g_last_is_rt;
 static const char* BLIT_VS_ES="#version 310 es\nprecision highp float;\nout vec2 uv; uniform vec4 xf; void main(){ vec2 p=vec2(float(gl_VertexID&1)*2.0-1.0,float(gl_VertexID>>1)*2.0-1.0); uv=(p*0.5+0.5)*xf.zw+xf.xy; gl_Position=vec4(p,0.0,1.0); }";
 static const char* BLIT_FS_ES="#version 310 es\nprecision highp float;\nin vec2 uv; out vec4 o; layout(binding=0) uniform highp sampler2D t; void main(){ o=vec4(texture(t,uv).rgb,1.0); }";
@@ -2673,9 +2685,19 @@ static void screen_quad(GLuint tex, const float* xf, int tw, int th){
   glUseProgram(g_down_prog? g_down_prog : g_blit_prog); g_pipe_on=0; glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,tex); glBindSampler(0,0);
   glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR); glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
   { static const GLint idm[4]={GL_RED,GL_GREEN,GL_BLUE,GL_ALPHA}; glTexParameteriv(GL_TEXTURE_2D,GL_TEXTURE_SWIZZLE_RGBA,idm); }
-  if(g_down_prog){ glUniform4fv(g_down_xf,1,xf); float pxv[4]={ fabsf_(xf[2])/(float)(dw>0? dw : 1), fabsf_(xf[3])/(float)(dh>0? dh : 1), g_opt_aa? 1.0f : 0.0f, 0 }; glUniform4fv(g_down_px,1,pxv); }
+  if(g_down_prog){ glUniform4fv(g_down_xf,1,xf); float pxv[4]={ fabsf_(xf[2])/(float)(dw>0? dw : 1), fabsf_(xf[3])/(float)(dh>0? dh : 1), g_opt_aa? 1.0f : 0.0f, g_opt_sharp>0? (float)g_opt_sharp/100.0f : 0.0f }; glUniform4fv(g_down_px,1,pxv); }
   else { static GLint xl=-2; static GLuint xp; if(xl==-2 || xp!=g_blit_prog){ xl=glGetUniformLocation(g_blit_prog,"xf"); xp=g_blit_prog; } glUniform4fv(xl,1,xf); }
   glBindVertexArray(g_scratch_vao); glDrawArrays(GL_TRIANGLE_STRIP,0,4);
+  { /* test only: SWR_TEST_BACKBUFFER=frame,frame,...:prefix writes the window's back buffer (what goes on screen,
+       after the window pass) as prefix<frame>.ppm. Desktop grabs need the game in front; this does not */
+    static int cfg; static const char* list; static char pre[512]; extern int g_frames; static int last=-1;
+    if(!cfg){ cfg=1; const char* e=getenv("SWR_TEST_BACKBUFFER"); const char* c=e? strchr(e,':') : NULL; if(c){ list=e; snprintf(pre,sizeof pre,"%s",c+1); } }
+    if(list && g_frames!=last){ last=g_frames; const char* p=list;
+      while(*p && *p!=':'){ int f=atoi(p); if(f==g_frames){ u8* px=malloc((size_t)ww*wh*3);
+          if(px){ glReadBuffer(GL_BACK); glPixelStorei(GL_PACK_ALIGNMENT,1); glReadPixels(0,0,ww,wh,GL_RGB,GL_UNSIGNED_BYTE,px);
+            char fn[600]; snprintf(fn,sizeof fn,"%s%d.ppm",pre,f); FILE* o=fopen(fn,"wb");
+            if(o){ fprintf(o,"P6\n%d %d\n255\n",ww,wh); for(int y=wh-1;y>=0;y--) fwrite(px+(size_t)y*ww*3,1,(size_t)ww*3,o); fclose(o); } free(px); } }
+        while(*p && *p!=',' && *p!=':') p++; if(*p==',') p++; } } }
   rec_capture(tex,xf,tw,th); shot8_capture(tex,xf,tw,th); glUseProgram(g_blit_prog); glBindFramebuffer(GL_FRAMEBUFFER,0); glBindTexture(GL_TEXTURE_2D,tex);
   glTexParameteri(GL_TEXTURE_2D,0x8A48,0x8A49); }   /* restore DECODE for when the game samples it */
 static void screen_swap(void){ TM(TM_SWAP,backend_gl_swap()); state_dirty(); g_pipe_on=0; mb_reset(); }   /* Android overlay may touch state/program */

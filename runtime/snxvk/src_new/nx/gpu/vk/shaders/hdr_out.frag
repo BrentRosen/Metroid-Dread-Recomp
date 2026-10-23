@@ -20,6 +20,7 @@ layout(push_constant) uniform PC {
     float oa;             // prompt opacity, 0 = none
     float hold;           // hold progress 0..1
     float bx, by, bw, bh; // hold bar rectangle
+    float sharp;          // SWR: sharpening 0 off .. 1 (contrast-adaptive, like AMD CAS)
 } pc;
 layout(location = 0) out vec4 o;
 
@@ -76,6 +77,14 @@ vec3 fxaa(vec2 uv) {
     return texture(img, p).rgb;
 }
 
+// each pixel minus a share of its four neighbours, scaled down where the neighbourhood is near black or white
+vec3 cas(vec3 c, vec3 n, vec3 s, vec3 e, vec3 w, float k) {
+    vec3 mn = min(c, min(min(n, s), min(e, w))), mx = max(c, max(max(n, s), max(e, w)));
+    vec3 a = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0));
+    vec3 wt = -a * mix(0.125, 0.2, k);
+    return clamp((c + (n + s + e + w) * wt) / (1.0 + 4.0 * wt), 0.0, 1.0);
+}
+
 vec3 srgb_to_linear(vec3 c) {
     return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
 }
@@ -87,6 +96,11 @@ vec3 pq(vec3 nits) {
 void main() {
     vec2 uv = gl_FragCoord.xy / vec2(textureSize(img, 0));
     vec3 c = pc.aa > 0.5 ? fxaa(uv) : texelFetch(img, ivec2(gl_FragCoord.xy), 0).rgb;
+    if (pc.sharp > 0.0) {
+        ivec2 q = ivec2(gl_FragCoord.xy), m = textureSize(img, 0) - 1;
+        c = cas(c, texelFetch(img, clamp(q + ivec2(0, -1), ivec2(0), m), 0).rgb, texelFetch(img, clamp(q + ivec2(0, 1), ivec2(0), m), 0).rgb,
+                texelFetch(img, clamp(q + ivec2(1, 0), ivec2(0), m), 0).rgb, texelFetch(img, clamp(q + ivec2(-1, 0), ivec2(0), m), 0).rgb, pc.sharp);
+    }
     if (pc.oa > 0.0) {
         vec2 f = gl_FragCoord.xy;
         if (f.x >= pc.ox && f.y >= pc.oy && f.x < pc.ox + pc.ow && f.y < pc.oy + pc.oh) {

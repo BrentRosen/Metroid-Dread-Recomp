@@ -12,7 +12,7 @@
 
 int g_vk_hdr_ext;   /* VK_EXT_swapchain_colorspace enabled on the instance (device.c) */
 int g_vk_sc_hdr;    /* the swapchain: 0 SDR, 1 scRGB FP16, 2 HDR10 PQ (device.c) */
-extern int g_opt_hdr, g_opt_hdr_paper, g_opt_hdr_peak, g_opt_aa;   /* the runtime's .ini (g_opt_aa: FXAA, gpu_gl.c) */
+extern int g_opt_hdr, g_opt_hdr_paper, g_opt_hdr_peak, g_opt_aa, g_opt_sharp;   /* the runtime's .ini (g_opt_aa: FXAA, gpu_gl.c) */
 extern int backend_hdr_peak_nits(void);                  /* the display's peak, 0 if unknown */
 
 int vk_hdr_wanted(void) { return g_opt_hdr && g_vk_hdr_ext; }
@@ -24,7 +24,7 @@ extern u64 plat_ns(void);
 extern int skip_prompt_rgba(u8** px, int* w, int* h, int* tw);   /* gpu_gl.c: the prompt in the game's font */
 static float g_ovl_alpha;
 /* the present pass runs for HDR output, anti-aliasing, the FPS counter or the skip prompt (renderer.c show) */
-int vk_present_pass_wanted(void) { return g_vk_sc_hdr || g_opt_aa || g_opt_show_fps || g_skip_prompt || g_ovl_alpha > 0; }
+int vk_present_pass_wanted(void) { return g_vk_sc_hdr || g_opt_aa || g_opt_sharp > 0 || g_opt_show_fps || g_skip_prompt || g_ovl_alpha > 0; }
 
 static VkImage g_mid;
 static VmaAllocation g_mid_mem;
@@ -58,7 +58,7 @@ static int layout_make(void) {
                                           .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT}};
     VkDescriptorSetLayoutCreateInfo dci = {
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2, .pBindings = b};
-    VkPushConstantRange pc = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 64};
+    VkPushConstantRange pc = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, 68};
     VkPipelineLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                       .setLayoutCount = 1,
                                       .pSetLayouts = &g_dsl,
@@ -238,7 +238,8 @@ VkImage vk_hdr_mid(int srgb) {
         LOG("vulkan: HDR output %s, paper white %d nits, peak %d nits%s\n", g_vk_sc_hdr == 1 ? "scRGB" : "HDR10 (PQ)",
             g_opt_hdr_paper, g_opt_hdr_peak > 0 ? g_opt_hdr_peak : backend_hdr_peak_nits(), g_opt_aa ? ", FXAA" : "");
     else
-        LOG("vulkan: anti-aliasing (FXAA) in the present pass\n");
+        LOG("vulkan: present pass:%s%s%s\n", g_opt_aa ? " FXAA" : "", g_opt_sharp > 0 ? " sharpening" : "",
+            g_opt_aa || g_opt_sharp > 0 ? "" : " overlays only");
     return g_mid;
 }
 
@@ -261,7 +262,9 @@ void vk_hdr_resolve(VkCommandBuffer cb, VkImage sc) {
     struct {
         float paper, peak, mode, aa, out_srgb, knee;
         float ox, oy, ow, oh, oa, hold, bx, by, bw, bh;
+        float sharp; /* SWR: 0 off, else 0..1 (ini sharpening / 100) */
     } pc = {(float)paper, (float)peak, (float)g_vk_sc_hdr, g_opt_aa ? 1.0f : 0.0f, g_vk.sc_srgb ? 1.0f : 0.0f, 0.75f};
+    pc.sharp = g_opt_sharp > 0 ? (float)g_opt_sharp / 100.0f : 0.0f;
     if (g_ovl_state == 1) { /* SWR: first use: the prompt image to the GPU, in this frame's commands */
         VkBuffer sb; u64 so; u64 n = (u64)g_ovl_w * g_ovl_h * 4;
         u8* dst = vk_stage(n, 16, &sb, &so);
