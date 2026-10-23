@@ -3,7 +3,8 @@
 > **Work in progress.** This project was shared on Reddit and elsewhere before it was ready: the planned first proper
 > release is 1.0.0, and current builds (0.x) are early previews. Expect crashes, setup problems and rough edges on
 > hardware it has not been tested on. If something breaks, please open an issue and attach the `.log` file from the
-> game folder, plus your CPU, GPU, RAM and Windows version.
+> game folder, plus your CPU, GPU, RAM and Windows version. I'll do the best I can to resolve the errors and make this
+> a good experience.
 
 One Windows EXE that sets up, configures and runs a native PC build of **your own** copy of Metroid Dread 2.1.0.
 It is the SwitchRecomp runtime (by MZ Labs) with a Metroid Dread front end built in: first-run setup that compiles
