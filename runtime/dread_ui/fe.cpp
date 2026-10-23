@@ -476,6 +476,7 @@ static void page_about() {
         {"ScarletNX contributors", "Native Vulkan renderer: GPU front end, Maxwell to SPIR-V shader translation (GPL-3.0)."},
         {"Krydar, Nova77, xSeRosiSx", "Button-icon mods: Switch to XBOX Layout (Krydar), Switch to PS4 Layout (Nova77), Switch to PS5 Layout (xSeRosiSx), downloaded from gamebanana.com when you choose them."},
         {"Xelu's FREE Controller Prompts", "The PlayStation button art in those icon mods."},
+        {"Smashicons - Flaticon", "The program icon: Metroid icon created by Smashicons, flaticon.com/free-icons/metroid (Flaticon licence)."},
         {"theboy181", "60 FPS cutscenes, 21:9 ultrawide and other Dread patches (github.com/theboy181/switch-ptchtxt-mods); 21:9 commissioned by Nikorasu081."},
         {"Dear ImGui by Omar Cornut", "This interface (MIT)."},
         {"SDL2 (Sam Lantinga and contributors)", "Controller support (zlib licence)."},

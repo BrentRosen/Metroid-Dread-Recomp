@@ -49,6 +49,9 @@ Button-icon packs (Controls > Button icons) are community mods downloaded from G
 them, not included here: Switch to XBOX Layout by Krydar, Switch to PS4 Layout by Nova77, Switch to PS5 Layout by
 xSeRosiSx, with PlayStation art from Xelu's FREE Controller Prompts.
 
+The program icon is the [Metroid icon created by Smashicons - Flaticon](https://www.flaticon.com/free-icons/metroid)
+(Flaticon licence, free with attribution).
+
 Third-party work this builds on is credited below and on the game's Credits page.
 DISCLAIMER
 AI was used

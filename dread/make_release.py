@@ -89,7 +89,7 @@ and 8BitDo over USB or Bluetooth. Keyboard: arrows = D-pad, WASD = stick, X/Z/C/
 
 Made by yozander2009-stack (project lead) with Claude by Anthropic (AI pair programmer).
 Credits: SwitchRecomp by MZ Labs (recompiler and runtime); ScarletNX (native Vulkan renderer); theboy181 (60 FPS cutscenes,
-21:9); Krydar, Nova77, xSeRosiSx (button-icon mods, downloaded on request; art: Xelu's FREE Controller Prompts); Dear ImGui; SDL2; zlib; libvpx; OpenH264; GCC / MinGW-w64; Python. Licences are in the licenses folder; the EXE is
+21:9); Krydar, Nova77, xSeRosiSx (button-icon mods, downloaded on request; art: Xelu's FREE Controller Prompts); program icon: Metroid icon created by Smashicons - Flaticon (https://www.flaticon.com/free-icons/metroid); Dear ImGui; SDL2; zlib; libvpx; OpenH264; GCC / MinGW-w64; Python. Licences are in the licenses folder; the EXE is
 GPL-3.0 (it contains the ScarletNX renderer) and its source is published with this release.
 Metroid Dread is (c) Nintendo. This project is not affiliated with or endorsed by Nintendo.
 """
@@ -290,6 +290,9 @@ DLLs the game ships beside it. They are not in this repository.
 Button-icon packs (Controls > Button icons) are community mods downloaded from GameBanana when a player asks for
 them, not included here: Switch to XBOX Layout by Krydar, Switch to PS4 Layout by Nova77, Switch to PS5 Layout by
 xSeRosiSx, with PlayStation art from Xelu's FREE Controller Prompts.
+
+The program icon is the [Metroid icon created by Smashicons - Flaticon](https://www.flaticon.com/free-icons/metroid)
+(Flaticon licence, free with attribution).
 
 Third-party work this builds on is credited below and on the game's Credits page.
 DISCLAIMER
