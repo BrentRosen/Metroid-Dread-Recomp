@@ -86,7 +86,7 @@ int fps_overlay_rects(int W,int H,int (*r)[5],int max){
     for(int k=0;k<7&&n<max;k++)if(glyph[i]>>k&1){r[n][0]=seg[k][0];r[n][1]=seg[k][1];r[n][2]=seg[k][2];r[n][3]=seg[k][3];r[n][4]=1;n++;}}
   return n;
 }
-int g_opt_audio_eos_sample_count=1;   /* on since 2026-10-14's tests (cinematic clock ~2x and cut music without it) */
+int g_opt_audio_eos_sample_count=1;   /* always on (cinematic clock ~2x and cut music without it); SWR_AUDIO_OLD_EOS=1 = off, tests only */
 char g_opt_pad_map[128]="";   /* physical-position button remapping, empty = identity */
 int g_opt_ctrl_api=0, g_opt_ctrl_index=0, g_opt_deadzone=7000;
 char g_opt_button_icons[16]="auto";
@@ -315,7 +315,7 @@ static void ini_apply(const char* k, const char* v){
     else if(!strcmp(k,"video_async_retire")) g_opt_video_async_retire=atoi(v)!=0;
     else if(!strcmp(k,"video_avx2")) g_opt_video_avx2=atoi(v)!=0;
     else if(!strcmp(k,"video_block_copy")) g_opt_video_block_copy=atoi(v)!=0;
-    else if(!strcmp(k,"audio_eos_sample_count")) g_opt_audio_eos_sample_count=atoi(v)!=0;
+    else if(!strcmp(k,"audio_eos_sample_count")) {}   /* always on since v0.3.1: old .ini values (often 0) are ignored */
     else if(!strcmp(k,"audio_surround_downmix")) g_opt_audio_surround_downmix=atoi(v)!=0;
     else if(!strcmp(k,"resolution")){ g_opt_resf=(float)atof(v); if(g_opt_resf<0.25f) g_opt_resf=0.25f; if(g_opt_resf>4) g_opt_resf=4; }
     else if(!strcmp(k,"shadows")) g_opt_shadows=atoi(v);
@@ -393,7 +393,6 @@ static const IniOpt INI_GRAPHICS[]={
 #endif
   {NULL,NULL,NULL}};
 static const IniOpt INI_PERF[]={
-  {"audio_eos_sample_count","1","1 = reset voice sample position at end-of-stream boundaries (without it cutscene music\n;   cuts out halfway and cinematics run too fast)"},
   {"audio_surround_downmix","0","1 = include all six audio channels in stereo output (experimental)"},
   {"fps_limit","1","1 = 60 FPS (the speed of a Switch), 0 = unlimited (the game runs faster). Values under 60 are treated as 60: the game advances one step per image, so 30 meant half speed. F4 changes it in game"},
   {"video_async_retire","0","1 = retire obsolete video pictures on a bounded worker (experimental; restart required)"},

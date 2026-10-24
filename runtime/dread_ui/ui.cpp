@@ -522,7 +522,6 @@ static std::vector<Opt> build_options() {
     I("fast_forward_speed", "Performance", "Gameplay", "Fast-forward speed", LIVE_YES, "3", 2, 8, 1, "");
     // Audio
     I("volume", "Audio", "Audio", "Master volume", LIVE_YES, "100", 0, 200, 5, "");
-    B("audio_eos_sample_count", "Performance", "Audio", "Voice position fix at stream ends", LIVE_YES, "1", "Fixes cutscene music cutting out halfway and cinematics running too fast. Leave it on.");
     B("audio_surround_downmix", "Performance", "Audio", "Mix all six surround channels into stereo", LIVE_YES, "0", "");
     // Controls
     B("mouse_aim", "Input", "Controls", "Mouse free aim", LIVE_YES, "1",

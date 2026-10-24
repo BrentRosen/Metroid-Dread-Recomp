@@ -122,7 +122,7 @@ void tab_content(int t) {
 #endif
        
             section("LOADING"); opt_row("fast_loading"); opt_row("fast_forward"); if (val("fast_forward") == "1") opt_row("fast_forward_speed"); break;
-    case 3: section("OUTPUT"); opt_row("volume"); section("COMPATIBILITY"); opt_row("audio_eos_sample_count"); opt_row("audio_surround_downmix"); break;
+    case 3: section("OUTPUT"); opt_row("volume"); section("COMPATIBILITY"); opt_row("audio_surround_downmix"); break;
     case 4: section("MOUSE"); opt_row("mouse_aim"); opt_row("mouse_sensitivity");
             section("CONTROLLER"); opt_row("button_icons"); opt_row("stick_deadzone"); opt_row("rumble"); opt_row("menu_shortcut"); opt_row("controller_api");
             help_text("Button mapping and menu buttons are on the Play screen's Controls page."); break;

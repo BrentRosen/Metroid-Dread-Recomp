@@ -405,7 +405,7 @@ static void page_gameplay() {
 static void page_audio() {
     page_title("AUDIO", "");
     section("OUTPUT"); draw_opt("volume");
-    section("COMPATIBILITY"); draw_opt("audio_eos_sample_count"); draw_opt("audio_surround_downmix");
+    section("COMPATIBILITY"); draw_opt("audio_surround_downmix");
 }
 
 static const char* const GAME_BUTTONS[17] = {"A", "B", "X", "Y", "Left stick click", "Right stick click", "L", "R", "ZL", "ZR", "+ (pause)", "- (map)",
@@ -768,11 +768,6 @@ extern "C" int fe_run(void* hwnd) {
     g_old = find_old_installs();
     if (g_test && getenv("SWR_FE_NO_OLD")) g_old.clear();   // tests: a PC with no earlier installation
     g_base = g_ini.get("setup_base", ""); g_update = g_ini.get("setup_update", "");
-    // up to v0.3.1 a new installation wrote audio_eos_sample_count=0 (the fix was default-off): switch it on once
-    if (g_ini.get("audio_eos_checked", "").empty()) {
-        if (g_ini.has("audio_eos_sample_count")) set("audio_eos_sample_count", "1");
-        set("audio_eos_checked", "1"); g_ini.save(); g_ini_dirty = false;
-    }
     bindings_from_string(g_ini.get("launcher_bindings", "1,0,6,7,10").c_str(), g_nav.bind); memcpy(g_old_bind, g_nav.bind, sizeof g_old_bind);
     g_nav.enabled = g_ini.get("launcher_nav", "1") != "0"; g_prompts = prompt_style_from(g_ini.get("launcher_prompts", "auto").c_str());
     GameCheck gc = check_installed(); g_page = (gc.code_ok && gc.data_ok) ? PG_PLAY : PG_SETUP; g_first_install = !gc.code_ok;

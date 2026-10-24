@@ -279,7 +279,9 @@ static void aroute_trace(ARenderer*r,const u32*ih,const u8*input,u64 size,const 
   if(sig!=last){last=sig;LOG("audio route:%s\n",line);}
 }
 extern int g_opt_audio_eos_sample_count;
+static void audio_eos_env(void){ static int done; if(!done){ done=1; if(getenv("SWR_AUDIO_OLD_EOS")) g_opt_audio_eos_sample_count=0; } }   /* tests only */
 void audio_render(SvcObj*o,const u32*ih,const u8*input,u64 size,const u8*voices,u32 count,u8*status){
+  audio_eos_env();
   if(!o->u[4]){ARenderer*r=calloc(1,sizeof *r);if(!r)return;r->voices=calloc(AV,sizeof(AVoice));r->samples=calloc(AM*24*AF,sizeof(float));if(!r->voices||!r->samples){free(r->voices);free(r->samples);free(r);return;}o->u[4]=(u64)(size_t)r;}
   ARenderer*r=(ARenderer*)(size_t)o->u[4];aroutes(r,ih,input,size);aroute_trace(r,ih,input,size,voices,count);memset(r->samples,0,AM*24*AF*sizeof(float));u32 active=0;
   for(u32 i=0;i<count;i++){const u8*vi=voices+i*0x170;u32 id=au32(vi)&(AV-1);AVoice*v=&r->voices[id];u8 in_use=vi[9],play=vi[0xA];
