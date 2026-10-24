@@ -86,6 +86,9 @@ static int binder_transact(u32 id, u32 code, PR* in, PW* out){
            flicker in the save room at 240 (worse with DLAA; seen by eye, OpenGL clean). So native Vulkan waits too;
            SWR_SNXVK_NO_FENCE_WAIT=1 is the old skip, for tests only */
         extern int g_snxvk_on; static int nw=-1; if(nw<0) nw=getenv("SWR_SNXVK_NO_FENCE_WAIT")!=NULL;
+        /* 2026-10-23: waiting on the previous frame's fence instead (game one frame ahead) measured no gain at a 240 cap
+           (232 vs 232 FPS), more >8 ms frames, and made the loading screen's spinner flicker on screen (the loading thread
+           draws into the one buffer it queues, slot 0, while it is shown), so this waits on the current frame */
         if(!g_snxvk_on || !nw) for(u32 i=0;i<nf;i++){ u32 id,val; memcpy(&id,qi+0x34+i*8,4); memcpy(&val,qi+0x38+i*8,4); if(id!=0xFFFFFFFFu){ u64 f0=plat_ns(); int ok=syncpt_wait(id,val,100000000); u64 fw=plat_ns()-f0;
             if(fw>50000000ull) LOG("vi: QUEUE_BUFFER fence %u: syncpt %u wanted %u, now %u, waited %.0f ms%s\n",i,id,val,syncpt_read(id),fw/1e6,ok? "" : " (timed out)"); } } }
       if(len>=0x28){ extern volatile i32 g_vi_crop[4]; extern volatile u32 g_vi_transform; i32 cr[4]; memcpy(cr,qi+0x0C,16); for(int i=0;i<4;i++) g_vi_crop[i]=cr[i]; memcpy((void*)&g_vi_transform,qi+0x20,4);
