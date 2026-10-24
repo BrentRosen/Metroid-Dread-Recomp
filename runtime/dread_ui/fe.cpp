@@ -533,7 +533,8 @@ static void page_advanced() {
     {
         Rec r = recommend();
         row_text("Detected", hw_line().c_str());
-        help_text((r.summary + " Also: docked, shaders built before playing, 60 FPS loading screens.").c_str());
+        help_text((r.summary + (r.renderer == "vulkan_native" ? " Also: docked, shaders saved as you play, 60 FPS loading screens."
+                                                              : " Also: docked, shaders built before playing, 60 FPS loading screens.")).c_str());
         if (row_button("##rec", "Apply the recommended settings", "APPLY", true)) { apply_rec(r); flash("Recommended settings applied"); }
         if (!r.note.empty()) help_text(r.note.c_str());
     }
