@@ -133,7 +133,7 @@ static void controller_status_card() {
 
 // ---------------------------------------------------------------- settings picked for this PC (Play screen AUTO-SET, Advanced,
 // and once after first-time setup when nothing was brought over from an older installation)
-struct Rec { float res = 1; std::string fps, af, asp, sharp, summary, note; };
+struct Rec { float res = 1; std::string fps, af, asp, sharp, renderer, summary, note; };
 static Rec recommend() {
     if (!g_hw_done) { g_hw = detect_hardware(); g_hw_done = true; }
     Rec r; float ratio = (float)g_hw.w / std::max(1, g_hw.h);
@@ -143,9 +143,14 @@ static Rec recommend() {
     r.fps = g_hw.hz >= 230 && g_hw.tier == "high" && g_hw.cores >= 8 ? "240" : g_hw.hz >= 140 && g_hw.tier != "low" ? "144" : g_hw.hz >= 115 && g_hw.tier != "low" ? "120" : "1";
     r.af = g_hw.tier != "low" ? "16" : "4";
     r.sharp = base * r.res < g_hw.h - 1 ? "25" : "0";   // the picture is stretched to the screen: a light sharpen
-    r.summary = fmt("Resolution %s, %s, picture %s, anisotropic filtering %s\xC3\x97%s, OpenGL, fullscreen.",
+    // renderer: above 60 FPS on a discrete NVIDIA / AMD card native Vulkan is clearly smoother (2026-10-23, RTX 5070, 240 cap:
+    // seconds under 200 FPS 2 vs 33-35 with OpenGL, whose driver-call thread is the limit in heavy rooms). At 60 both hold 60, and
+    // OpenGL is the most tested; integrated graphics stay on OpenGL (native Vulkan untested there). It falls back to OpenGL by itself.
+    bool vk_vendor = !g_hw.integrated && (g_hw.gpu.find("NVIDIA") != std::string::npos || g_hw.gpu.find("AMD") != std::string::npos || g_hw.gpu.find("Radeon") != std::string::npos);
+    r.renderer = vk_vendor && r.fps != "1" ? "vulkan_native" : "opengl";
+    r.summary = fmt("Resolution %s, %s, picture %s, anisotropic filtering %s\xC3\x97%s, %s, fullscreen.",
                     res_text(r.res, true, r.asp.c_str()).c_str(), r.fps == "1" ? "60 FPS" : (r.fps + " FPS").c_str(), r.asp.c_str(), r.af.c_str(),
-                    r.sharp != "0" ? ", light sharpening" : "");
+                    r.sharp != "0" ? ", light sharpening" : "", r.renderer == "vulkan_native" ? "Native Vulkan (smoothest at high frame rates)" : "OpenGL");
     if (g_hw.ram_gb && g_hw.ram_gb < 8) r.note = fmt("This PC has %d GB of memory; the game needs about 4 GB, so 8 GB is recommended. Close other programs before playing.", g_hw.ram_gb);
 #ifndef SWR_RELEASE   // the public release has no DLSS
     else if (g_hw.rtx) r.note = "Optional: Graphics > Native Vulkan + NVIDIA DLAA gives the cleanest edges on RTX cards (experimental renderer).";
@@ -153,7 +158,7 @@ static Rec recommend() {
     return r;
 }
 static void apply_rec(const Rec& r) {
-    set("docked", "1"); set("fullscreen", "1"); set("resolution", fmt("%g", r.res)); set("fps_limit", r.fps); set("renderer", "opengl"); set("aspect", r.asp);
+    set("docked", "1"); set("fullscreen", "1"); set("resolution", fmt("%g", r.res)); set("fps_limit", r.fps); set("renderer", r.renderer); set("aspect", r.asp);
     set("anisotropy", r.af); set("sharpening", r.sharp); set("sleep_waits", "1"); set("texture_threads", "0"); set("prebuild_shaders", "1"); set("loading_60fps", "1");
     set("auto_set", "1");
 }

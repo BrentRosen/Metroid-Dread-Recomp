@@ -151,7 +151,10 @@ int snxvk_start(void){
     int rec= !(snxvk_dlss_mode>0 || g_opt_hdr) && !getenv("SWR_SNXVK_NO_RECORD_THREAD");
     snxv_swr_settings_set(g_opt_resf,g_opt_shadows,snxvk_opt_vsync,g_opt_aniso,rec);
     LOG("vulkan_native: command recording thread %s\n",rec? "on" : "off (DLSS or HDR output records directly)"); }   /* FIFO only with forced_vsync=1, like the GL path: otherwise mailbox, paced by snxvk_present (FIFO at 144/240 FPS on a 239 Hz screen lost frames to vblank waits) */
-  if(!snxv_vk_renderer.start()){ WARN("vulkan_native: Vulkan 1.3 renderer could not start (see above): using OpenGL\n"); return 0; }
+  if(!snxv_vk_renderer.start()){ WARN("vulkan_native: Vulkan 1.3 renderer could not start (see above): using OpenGL\n");
+    /* the guest memory was set up with write tracking for Vulkan; OpenGL would scan it on every submit (measured 19 FPS,
+       GPU thread 98% busy) - it runs without, as when OpenGL is chosen */
+    g_ww_ok=0; return 0; }
   g_snxvk_on=1;
   LOG("renderer: native Vulkan (experimental, ScarletNX renderer; shaders translated to SPIR-V)\n");
   return 1; }

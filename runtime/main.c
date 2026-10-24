@@ -608,7 +608,8 @@ void vi_show_buffer(u32 nvmap_id, u32 offset, u32 w, u32 h, u32 pitch, u32 layou
     { extern int snxvk_pacing(void); if(snxvk_pacing()){ g_last_present=plat_ns(); goto limiter_finished; } }   /* native Vulkan paces before its present */
     if(g_gl && gpu_gl_present_pacing()){
       /* Guest RAM is no longer read for this frame before the next guest
-         update starts. The existing GL queue bounds outstanding presents. */
+         update starts. The existing GL queue bounds outstanding presents.
+         (2026-10-23: skipping this wait measured no gain at 240: in heavy rooms the GL call thread is the limit) */
       gpu_gl_frame_consumed();g_last_present=plat_ns();goto limiter_finished;
     }
   }
