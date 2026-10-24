@@ -23,7 +23,10 @@ static PMutex g_logw; static PCond g_lq_cv;
 
 static void log_emit(const char* q, u32 n){
   for(u32 at=0; at+4<=n;){ u32 h; memcpy(&h,q+at,4); at+=4; u32 L=h&0xFFFF, pre=(h>>16)&0x7FFF;
-    if(!g_logf){ char p[1200]; snprintf(p,sizeof p,"%s%s.log",g_exedir,g_exename[0]?g_exename:"switchrecomp"); g_logf=fopen(p,"w"); }
+    if(!g_logf){ char p[1200], q[1220]; const char* n=g_exename[0]?g_exename:"switchrecomp";
+      /* keep the last run's log (a crash report needs it; the player restarts the game to send it) */
+      snprintf(p,sizeof p,"%s%s.log",g_exedir,n); snprintf(q,sizeof q,"%s%s.previous.log",g_exedir,n); remove(q); rename(p,q);
+      g_logf=fopen(p,"w"); }
     if(g_logf) fwrite(q+at,1,L,g_logf);
     if(h>>31){ fwrite(q+at+pre,1,L-pre,stderr);
 #if defined(__ANDROID__)

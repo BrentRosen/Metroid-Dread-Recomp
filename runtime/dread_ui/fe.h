@@ -76,6 +76,9 @@ MigrateResult migrate(const OldInstall& o, bool settings, bool saves, bool mods,
 
 // ---------------------------------------------------------------- saves
 bool backup_saves(std::string* out_zip, std::string* err);
+std::string cpu_name();
+std::string reports_dir();
+bool make_report(const std::string& info, std::string* out_zip, std::string* err);   // reports\\Metroid-Dread-report-<time>.zip: logs + settings
 std::string backups_dir();
 
 // ---------------------------------------------------------------- mods (LayeredFS folders + load_order.txt, same format as the Python launcher)

@@ -307,27 +307,50 @@ static unsigned crc32(const std::string& d) {
     if (!crc_table[1]) for (unsigned i = 0; i < 256; i++) { unsigned c = i; for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320u ^ (c >> 1) : c >> 1; crc_table[i] = c; }
     unsigned c = 0xFFFFFFFFu; for (unsigned char b : d) c = crc_table[(c ^ b) & 0xFF] ^ (c >> 8); return c ^ 0xFFFFFFFFu;
 }
+struct ZipEntry { std::string name, data; unsigned crc; unsigned off; };
+static std::string stored_zip(std::vector<ZipEntry>& es) {
+    std::string z; auto u16 = [&](unsigned v) { z += (char)(v & 255); z += (char)(v >> 8 & 255); };
+    auto u32 = [&](unsigned v) { u16(v & 0xFFFF); u16(v >> 16); };
+    for (auto& e : es) { e.crc = crc32(e.data); e.off = (unsigned)z.size(); u32(0x04034b50); u16(20); u16(0x0800); u16(0); u16(0); u16(0); u32(e.crc); u32((unsigned)e.data.size()); u32((unsigned)e.data.size()); u16((unsigned)e.name.size()); u16(0); z += e.name; z += e.data; }
+    unsigned cd = (unsigned)z.size();
+    for (auto& e : es) { u32(0x02014b50); u16(20); u16(20); u16(0x0800); u16(0); u16(0); u16(0); u32(e.crc); u32((unsigned)e.data.size()); u32((unsigned)e.data.size()); u16((unsigned)e.name.size()); u16(0); u16(0); u16(0); u16(0); u32(0); u32(e.off); z += e.name; }
+    unsigned cdlen = (unsigned)z.size() - cd; u32(0x06054b50); u16(0); u16(0); u16((unsigned)es.size()); u16((unsigned)es.size()); u32(cdlen); u32(cd); u16(0);
+    return z;
+}
 std::string backups_dir() { return join(P.appdata, "save-backups"); }
 bool backup_saves(std::string* out, std::string* err) {
     std::string src = join(P.data, "save");
     if (!dir_exists(src)) { if (err) *err = "No saves yet."; return false; }
-    struct E { std::string name, data; unsigned crc; unsigned off; };
-    std::vector<E> es; long long before = dir_size(src);
-    walk(src, "", [&](const std::string& r, bool dir, long long) { if (dir) return; E e; e.name = "save/" + r; for (auto& c : e.name) if (c == '\\') c = '/'; e.data = read_text(join(src, r)); e.crc = crc32(e.data); es.push_back(e); });
+    std::vector<ZipEntry> es; long long before = dir_size(src);
+    walk(src, "", [&](const std::string& r, bool dir, long long) { if (dir) return; ZipEntry e; e.name = "save/" + r; for (auto& c : e.name) if (c == '\\') c = '/'; e.data = read_text(join(src, r)); es.push_back(e); });
     if (es.empty()) { if (err) *err = "The save folder is empty."; return false; }
     if (dir_size(src) != before) { if (err) *err = "Saves changed during the backup. Close the game and try again."; return false; }
-    std::string z; auto u16 = [&](unsigned v) { z += (char)(v & 255); z += (char)(v >> 8 & 255); };
-    auto u32 = [&](unsigned v) { u16(v & 0xFFFF); u16(v >> 16); };
-    for (auto& e : es) { e.off = (unsigned)z.size(); u32(0x04034b50); u16(20); u16(0x0800); u16(0); u16(0); u16(0); u32(e.crc); u32((unsigned)e.data.size()); u32((unsigned)e.data.size()); u16((unsigned)e.name.size()); u16(0); z += e.name; z += e.data; }
-    unsigned cd = (unsigned)z.size();
-    for (auto& e : es) { u32(0x02014b50); u16(20); u16(20); u16(0x0800); u16(0); u16(0); u16(0); u32(e.crc); u32((unsigned)e.data.size()); u32((unsigned)e.data.size()); u16((unsigned)e.name.size()); u16(0); u16(0); u16(0); u16(0); u32(0); u32(e.off); z += e.name; }
-    unsigned cdlen = (unsigned)z.size() - cd; u32(0x06054b50); u16(0); u16(0); u16((unsigned)es.size()); u16((unsigned)es.size()); u32(cdlen); u32(cd); u16(0);
+    std::string z = stored_zip(es);
     make_dirs(backups_dir());
     std::string path = join(backups_dir(), "Metroid-Dread-saves-" + now_stamp() + ".zip");
     if (!write_text(path, z)) { if (err) *err = "Could not write " + path; return false; }
     std::string back = read_text(path);   // verify: same bytes, every entry's CRC still matches
     if (back != z) { if (err) *err = "Backup verification failed."; DeleteFileW(wide(path).c_str()); return false; }
     for (auto& e : es) if (crc32(back.substr(e.off + 30 + e.name.size(), e.data.size())) != e.crc) { if (err) *err = "Backup verification failed."; return false; }
+    if (out) *out = path; return true;
+}
+
+// ---------------------------------------------------------------- problem reports: this game's logs and settings in one zip (no saves, no game files)
+std::string cpu_name() {
+    wchar_t b[256] = {}; DWORD n = sizeof b;
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", L"ProcessorNameString", RRF_RT_REG_SZ, nullptr, b, &n) != ERROR_SUCCESS) return "";
+    std::string s = utf8(b); while (!s.empty() && s.back() == ' ') s.pop_back(); while (!s.empty() && s[0] == ' ') s.erase(0, 1); return s;
+}
+std::string reports_dir() { return join(P.exedir, "reports"); }
+bool make_report(const std::string& info, std::string* out, std::string* err) {
+    std::vector<ZipEntry> es; ZipEntry i; i.name = "system.txt"; i.data = info; es.push_back(i);
+    const std::string n = P.exename;
+    const std::string files[] = {n + ".log", n + ".previous.log", "performance.txt", "threads.txt", "setup.log", n + ".ini", "update.txt"};
+    for (auto& f : files) { std::string p = join(P.exedir, f); if (!file_exists(p)) continue; ZipEntry e; e.name = f; e.data = read_text(p); es.push_back(e); }
+    if (es.size() < 2) { if (err) *err = "There are no logs yet. Start the game once, then try again."; return false; }
+    make_dirs(reports_dir());
+    std::string path = join(reports_dir(), "Metroid-Dread-report-" + now_stamp() + ".zip");
+    if (!write_text(path, stored_zip(es))) { if (err) *err = "Could not write " + path; return false; }
     if (out) *out = path; return true;
 }
 

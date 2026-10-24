@@ -297,6 +297,25 @@ static void update_rows(bool banner) {
 }
 
 // ---------------------------------------------------------------- pages
+static std::string url_enc(const std::string& s) {
+    std::string o; for (unsigned char c : s) { if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '-' || c == '.' || c == '_' || c == '~') o += (char)c; else o += fmt("%%%02X", c); } return o;
+}
+// Problem report: pack the logs, show the zip, and open the GitHub bug form with what we know filled in
+static std::string g_report_url;   // tests (SWR_FE_REPORT): the page that would open
+static void report_problem() {
+    if (!g_hw_done) { g_hw = detect_hardware(); g_hw_done = true; }
+    if (g_ini_dirty) { g_ini.save(); g_ini_dirty = false; }
+    std::string ver = installed_version(), cpu = cpu_name(), rn = get("renderer");
+    std::string info = fmt("version %s\r\nrenderer %s\r\ngpu %s\r\ncpu %s\r\n%s\r\n", ver.c_str(), rn.c_str(), g_hw.gpu.c_str(), cpu.c_str(), hw_line().c_str());
+    std::string zip, err;
+    if (!make_report(info, &zip, &err)) { flash(err); return; }
+    if (!g_test) open_in_explorer(reports_dir());
+    std::string url = "https://github.com/yozander2009-stack/Metroid-Dread-Recomp/issues/new?template=bug_report.yml&version=" + url_enc(ver) +
+                      "&gpu=" + url_enc(g_hw.gpu) + "&cpu=" + url_enc(cpu) + (g_hw.ram_gb ? "&ram=" + url_enc(fmt("%d GB", g_hw.ram_gb)) : std::string());
+    if (g_test) g_report_url = url; else ShellExecuteW(nullptr, L"open", wide(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    flash("Logs packed: " + zip + ". Drag it into the bug report.");
+}
+
 static void page_play() {
     ImDrawList* dl = ImGui::GetWindowDrawList(); ImVec2 p = ImGui::GetCursorScreenPos();
     logo(dl, {p.x, p.y + S(10)}, S(70), true);
@@ -354,6 +373,9 @@ static void page_play() {
         std::string m; bool rb = false, rs = false;
         if (update_rollback(&m, &rb, &rs)) { flash(m); if (rb) start_rebuild(rs); else if (rs) { g_do_restart = true; g_quit = true; } } else flash(m); }
     help_text("Updates come from this project's GitHub releases page and only replace this game's own files.");
+    section("PROBLEMS");
+    if (row_button("##report", "Report a problem: pack the logs and open the bug report page", "REPORT")) report_problem();
+    help_text("The zip has this game's logs and settings, nothing else (no saves, no game files). Logs show your Windows user name in folder paths. Drag the zip into the report.");
     section("FOLDERS");
     if (row_button("##gf", "Game folder", "OPEN")) open_in_explorer(P.exedir);
     if (row_button("##sc", "Screenshots and recordings", "OPEN")) { make_dirs(join(P.exedir, "captures")); open_in_explorer(join(P.exedir, "captures")); }
@@ -707,6 +729,11 @@ static void test_tick() {
         Rec r = recommend(); apply_rec(r); g_ini.save(); g_ini_dirty = false;
         const char* rp = getenv("SWR_FE_RESULT"); FILE* f = rp ? fopen(rp, "a") : nullptr;
         if (f) { fprintf(f, "autoset tier=%s detected=%s | picked=%s | note=%s\n", g_hw.tier.c_str(), hw_line().c_str(), r.summary.c_str(), r.note.c_str()); fclose(f); }
+        g_quit = true;
+    }
+    if (getenv("SWR_FE_REPORT") && g_frame_no == 30) {   // presses REPORT, writes the zip and the page it would open, then quits
+        report_problem(); const char* rp = getenv("SWR_FE_RESULT"); FILE* f = rp ? fopen(rp, "a") : nullptr;
+        if (f) { fprintf(f, "report msg=%s url=%s\n", g_flash.c_str(), g_report_url.c_str()); fclose(f); }
         g_quit = true;
     }
     if (getenv("SWR_FE_UNDO")) {   // presses UNDO once, writes what it said to the result file, then quits
