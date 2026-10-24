@@ -389,7 +389,7 @@ static const IniOpt INI_GRAPHICS[]={
   {"hdr","0","1 = HDR output (renderer=vulkan_native, Windows HDR on): the game's picture on an HDR swapchain, highlights\n;   expanded toward the display's peak (like Windows Auto HDR). Falls back to SDR when the display offers no HDR"},
   {"hdr_paper_white","200","HDR output: brightness of normal (SDR white) content in nits (80-1000)"},
   {"hdr_peak","0","HDR output: brightest highlight in nits; 0 = what the display reports"},
-  {"prebuild_shaders","0","1 = before the game draws, build every shader the game ships (romfs/system/shd) into the\n;   shader cache, so they don't compile the first time they're used. The first start takes longer; later starts only\n;   look at changed files. OpenGL renderer; native Vulkan saves the shaders it builds as you play and reuses them"},
+  {"prebuild_shaders","0","1 = before the game draws, build every shader the game ships (romfs/system/shd) into the\n;   shader cache, so they don't compile the first time they're used. The first start takes longer; later starts only\n;   look at changed files. Native Vulkan: the game's shaders are translated in the background at start and the\n;   pipeline recipes (vulkan_native/pipeline_recipes.bin) made from them"},
   {"shadows","1","0 = disable shadow maps (more FPS)"},
   {"renderer","opengl","opengl, or vulkan = the game still renders with OpenGL but Vulkan puts the frames on screen\n;   (falls back to OpenGL output if the GPU driver can't share images between the two; restart required),\n;   or vulkan_native = EXPERIMENTAL native Vulkan renderer from ScarletNX (GPL-3.0; falls back to OpenGL if it can't start)"},
 #ifndef SWR_RELEASE   /* the public release: no DLSS (GPL) and no frame generation in that build */

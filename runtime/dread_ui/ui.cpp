@@ -537,8 +537,8 @@ static std::vector<Opt> build_options() {
     I("rumble", "Input", "Controls", "Rumble strength", LIVE_YES, "100", 0, 200, 10, "0 = off. Up to 200% boosts soft effects.");
     // Advanced
     B("wait_for_shaders", "Launcher", "Advanced", "Wait for new shaders", LIVE_RESTART, "1", "On: no missing objects, a short stutter the first time an effect appears. Off: no stutter, objects can pop in.");
-    B("prebuild_shaders", "Graphics", "Advanced", "Build all shaders before playing (OpenGL)", LIVE_RESTART, "1",
-      "The first start after an update or driver change takes up to about 30 s. Native Vulkan doesn't need this: it saves the shaders it builds as you play and reuses them in later sessions.");
+    B("prebuild_shaders", "Graphics", "Advanced", "Build all shaders before playing", LIVE_RESTART, "1",
+      "OpenGL: the first start after an update or driver change takes up to about 30 s. Native Vulkan: the game's shaders are prepared in the background while the title screen plays, so the first session stutters much less.");
     B("low_priority_shader_compiler", "Performance", "Advanced", "Compile shaders at low priority", LIVE_RESTART, "1", "");
     B("sleep_waits", "Performance", "Advanced", "Sleep instead of spinning while waiting for the driver", LIVE_YES, "1", "Frees CPU time on 2-4 core PCs.");
     C("texture_threads", "Performance", "Advanced", "Texture unpacking threads", LIVE_RESTART, "0", {{"0", "Automatic"}, {"1", "1"}, {"2", "2"}, {"4", "4"}, {"8", "8"}}, "");
