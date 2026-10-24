@@ -42,7 +42,7 @@ static int chunk_read(u64 off, u8* d, u64 size){ (void)off; memset(d,0,size); re
 static PMutex g_romlock;
 
 typedef struct DNode { char* name; int parent; int first_child, next_sib, first_file; u32 off; } DNode;
-typedef struct FNode { char* name; int parent, next_sib; u32 off; u64 size; char* host; } FNode;
+typedef struct FNode { char* name; int parent, next_sib; u32 off; u64 size; char* host; u64 img; } FNode;   /* img: its place in the image */
 static DNode* dn; static int ndn, capdn; static FNode* fn; static int nfn, capfn;
 
 static int add_dir(const char* name, int parent){ if(ndn==capdn){ capdn=capdn?capdn*2:256; dn=realloc(dn,sizeof(DNode)*capdn); }
@@ -157,6 +157,7 @@ static void romfs_build(const char* dir){
   for(int i=0;i<nfn;i++){ fn[i].size=fn[i].size; data=(data+0xF)&~0xFull;
     /* an empty file has the same offset as the next one: listing it would make romfs_read find it
        instead and read the real file back as padding (zeros). it is never read anyway */
+    fn[i].img=rdata_off+data;
     if(fn[i].size){ rfiles[nrfiles].path=fn[i].host; rfiles[nrfiles].off=rdata_off+data; rfiles[nrfiles].size=fn[i].size; nrfiles++; }
     u8* e=rmeta+fmt+fn[i].off; u32 w[2]={dn[fn[i].parent].off, fn[i].next_sib>=0? fn[fn[i].next_sib].off : 0xFFFFFFFFu};
     memcpy(e,w,8); memcpy(e+8,&data,8); memcpy(e+16,&fn[i].size,8);
@@ -198,6 +199,20 @@ void romfs_init(void){
 }
 
 u64 romfs_size(void){ return rtotal; }
+/* the RomFS's files in folder (as "/system/shd/") by their game path, place in the image and size, mods applied: the
+   native Vulkan renderer's shader pass (snxvk_glue.c romfs_files). -1 without a file table (romfs.bin, APK), 1 when
+   each said stop, else 0 */
+int romfs_list(const char* folder, int (*each)(void* ctx, const char* name, u64 off, u64 size), void* ctx){
+  if(!nfn) return -1;
+  size_t fl=strlen(folder);
+  for(int i=0;i<nfn;i++){ if(!fn[i].size) continue;
+    char nm[1024]; size_t at=sizeof nm-1; nm[at]=0;   /* built from the end: file, then each parent folder */
+    int ok=1; const char* parts[64]; int np=0; parts[np++]=fn[i].name;
+    for(int d=fn[i].parent; d>0 && ok; d=dn[d].parent){ if(np==64) ok=0; else parts[np++]=dn[d].name; }
+    for(int k=0;k<np && ok;k++){ size_t l=strlen(parts[k]); if(l+1>at) { ok=0; break; } at-=l; memcpy(nm+at,parts[k],l); nm[--at]='/'; }
+    if(!ok || strncmp(nm+at,folder,fl)) continue;
+    if(each(ctx,nm+at,fn[i].img,fn[i].size)) return 1; }
+  return 0; }
 
 /* cache of open host files */
 /* Reserve the cache entry under its short metadata lock, then perform

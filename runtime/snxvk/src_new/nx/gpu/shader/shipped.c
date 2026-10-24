@@ -16,8 +16,10 @@ static u16 le16(const u8* p) { return (u16)(p[0] | p[1] << 8); }
 int shipped_kind(const u8* head, size_t n) {
     if (n < 4) return SHIPPED_SKIP;
     if (!memcmp(head, "Yaz0", 4)) return SHIPPED_YAZ0;
-    /* BNSH, BFSHA, agl's SHARCB, SARC, a program's own wrapper or a bare NVN file */
+    /* BNSH, BFSHA, agl's SHARCB, SARC, a program's own wrapper or a bare NVN file. SWR: and Metroid Dread's MSHD
+       (system/shd/*.bshdat), whose 1342 programs each sit in the usual wrapper */
     if (!memcmp(head, "BNSH", 4) || !memcmp(head, "FSHA", 4) || !memcmp(head, "BAHS", 4) || !memcmp(head, "SARC", 4) ||
+        !memcmp(head, "MSHD", 4) ||
         le32(head) == NVN_WRAP || le32(head) == NVN_FILE)
         return SHIPPED_SCAN;
     return SHIPPED_SKIP;

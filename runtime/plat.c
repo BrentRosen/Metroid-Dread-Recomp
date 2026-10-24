@@ -91,6 +91,13 @@ void fatal(const char* fmt, ...){
 #include <io.h>        /* _get_osfhandle */
 #include "thread_diag.inc"
 void pm_init(PMutex* m){ InitializeSRWLock(&m->l); }
+/* the file name of the module (EXE or DLL) holding pc, and pc's offset in it: the crash report names a graphics
+   driver or system DLL that crashed. 0 when no module holds it */
+int plat_module_of(const void* pc, char* name, int n, u64* off){
+  HMODULE m=NULL; char p[MAX_PATH];
+  if(!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,(LPCSTR)pc,&m) || !m) return 0;
+  if(!GetModuleFileNameA(m,p,sizeof p)) return 0;
+  const char* s=strrchr(p,'\\'); snprintf(name,n,"%s",s? s+1 : p); *off=(u64)(uintptr_t)pc-(u64)(uintptr_t)m; return 1; }
 
 void pm_lock(PMutex* m){ td_wait_begin(1,(u64)(uintptr_t)m,0,(u64)(uintptr_t)__builtin_return_address(0)); AcquireSRWLockExclusive(&m->l); td_wait_end(); }
 

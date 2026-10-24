@@ -79,8 +79,11 @@ void syncpt_add_quiet(u32 id, u32 n){ extern void syncpt_incr(u32); while(n--) s
 void syncpt_events(void){}
 u64 kernel_find_symbol_exact(const char* name){ (void)name; return 0; }
 void loader_segments(void* each, void* ctx){ (void)each; (void)ctx; }
-int romfs_files(void* each, void* ctx){ (void)each; (void)ctx; return -1; }
-int romfs_peek(u64 off, void* dst, u64 n){ (void)off; (void)dst; (void)n; return -1; }
+/* the shipped-shader pass's RomFS readers (shipped_pass.c, prepare_shaders on): Metroid Dread keeps every shader in
+   system/shd/*.bshdat (the OpenGL pre-build reads the same), so only that folder is listed, not the 5 GB of packs */
+int romfs_files(int (*each)(void*,const char*,u64,u64), void* ctx){
+  extern int romfs_list(const char*, int (*)(void*,const char*,u64,u64), void*); return romfs_list("/system/shd/",each,ctx); }
+int romfs_peek(u64 off, void* dst, u64 n){ return romfs_read(off,dst,n)? -1 : 0; }
 int overlay_display_percent(void){ return 100; }
 void prepare_screen_draw(void* l, int sw, int sh, const int safe[4], int pct){ (void)l; (void)sw; (void)sh; (void)safe; (void)pct; }
 int prepare_screen_shown(void){ return 0; }
@@ -150,7 +153,12 @@ int snxvk_start(void){
     extern float g_opt_resf; extern int g_opt_shadows, g_opt_aniso, g_opt_hdr;
     int rec= !(snxvk_dlss_mode>0 || g_opt_hdr) && !getenv("SWR_SNXVK_NO_RECORD_THREAD");
     snxv_swr_settings_set(g_opt_resf,g_opt_shadows,snxvk_opt_vsync,g_opt_aniso,rec);
-    LOG("vulkan_native: command recording thread %s\n",rec? "on" : "off (DLSS or HDR output records directly)"); }   /* FIFO only with forced_vsync=1, like the GL path: otherwise mailbox, paced by snxvk_present (FIFO at 144/240 FPS on a 239 Hz screen lost frames to vblank waits) */
+    LOG("vulkan_native: command recording thread %s\n",rec? "on" : "off (DLSS or HDR output records directly)");
+    /* prebuild_shaders: the game's shaders translated in the background at start, and the pipeline recipes made from
+       them (pipeline.c rc_merge); SWR_VK_NO_PREPARE=1 = off (tests) */
+    { extern void snxv_swr_settings_prepare(int); extern int g_opt_prebuild;
+      int prep= g_opt_prebuild && !getenv("SWR_VK_NO_PREPARE"); snxv_swr_settings_prepare(prep);
+      if(prep) LOG("vulkan_native: the game's shaders are translated in the background, then the pipeline recipes made\n"); } }   /* FIFO only with forced_vsync=1, like the GL path: otherwise mailbox, paced by snxvk_present (FIFO at 144/240 FPS on a 239 Hz screen lost frames to vblank waits) */
   if(!snxv_vk_renderer.start()){ WARN("vulkan_native: Vulkan 1.3 renderer could not start (see above): using OpenGL\n");
     /* the guest memory was set up with write tracking for Vulkan; OpenGL would scan it on every submit (measured 19 FPS,
        GPU thread 98% busy) - it runs without, as when OpenGL is chosen */

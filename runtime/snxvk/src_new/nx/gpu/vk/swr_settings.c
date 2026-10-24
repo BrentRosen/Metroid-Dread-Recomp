@@ -13,3 +13,6 @@ void swr_settings_set(float resolution, int shadows, int vsync, int anisotropy, 
     g_settings.vulkan_video_decode = 0;
 }
 int swr_settings_recording_thread(void) { return g_settings.vulkan_recording_thread; }
+/* [Graphics] prebuild_shaders: the shipped-shader pass over the RomFS's system/shd (snxvk_glue.c romfs_files), in the
+   background (1, not 2: no count first, no screen), whose shaders the pipeline recipes are made from (pipeline.c) */
+void swr_settings_prepare(int on) { g_settings.prepare_shaders = on ? 1 : 0; }

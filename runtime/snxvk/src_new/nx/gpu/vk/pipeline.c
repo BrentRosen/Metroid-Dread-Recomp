@@ -1005,9 +1005,15 @@ static VkPipeline pipe_wait_here(Pipe* p) {
     __atomic_add_fetch(&g_pipe_wait_ns, plat_ns() - t0, __ATOMIC_RELAXED);
     return got;
 }
+static void rc_merge(void);
 /* k's entry, found or added (NULL with no memory): *found says whether it was there */
+static Pipe* pipe_entry_in(const PipeKey* k, int* found);
 static Pipe* pipe_entry(const PipeKey* k, int* found) {
     pf_merge();
+    rc_merge();
+    return pipe_entry_in(k, found);
+}
+static Pipe* pipe_entry_in(const PipeKey* k, int* found) {
     u64 h = vk_hash(k, sizeof *k);
     u32 b = (u32)(h ^ (h >> 32)) & (PIPEH - 1);
     for (Pipe* p = g_pipeh[b]; p; p = p->next)
@@ -1119,7 +1125,9 @@ VkPipelineCache vk_pipeline_cache(void) {
    one at a time, so the one at exit waits for one in progress to finish its file before the process ends */
 #define PCACHE_QUIET_NS 20000000000ull
 static PMutex g_psave = PMUTEX_INIT;
+static void rc_record(void);
 void vk_pipeline_save(int at_exit) {
+    if (at_exit && getenv("SWR_VK_RECIPES_RECORD")) rc_record();
     if (!at_exit && plat_ns() - __atomic_load_n(&g_pcache_used, __ATOMIC_RELAXED) < PCACHE_QUIET_NS) return;
     pm_lock(&g_psave);
     /* the shipped file's shaders the draws found, when that changed: nidx is settled once ship_ready */
@@ -1492,6 +1500,179 @@ static VkSh* pf_ship_take(u64 h, int stage, const u32 mask[20], u32 len, u64 qh,
     pf_shipref(&g_pf.file, mod_bits(s->mod), e->at, check);
     pf_ship_found(s);
     return s;
+}
+
+/* ------------------------------------------------------------ SWR: pipeline recipes
+   A PC's first run makes each pipeline as its view comes into sight: 110 ms apiece on a GTX 1080 without the driver's
+   cache, 9 s of waits in three minutes. The shader file only helps the runs after. A recipe names a pipeline by its
+   shaders' keys (the game's program hashes, as the draws and the shipped pass hash them) and its PipeKey without
+   modules: no SPIR-V, no game code. Once the shipped pass translated the game's programs on this PC (ship_ready), the
+   first draw's lookup (rc_merge) finds each recipe's shaders there and queues its pipeline to the workers behind the
+   draws', so most are made while the title screen plays. A recipe whose shader the pass didn't make, or whose key this
+   device would fill in another way, just goes unused. File: g_cachedir's pipeline_recipes.bin; SWR_VK_RECIPES_RECORD=1
+   adds the pipelines of this run to it at exit (test runs) */
+#define RC_MAGIC 0x31434552524B5653ull /* "SVKRREC1" */
+typedef struct {
+    u64 hash, qh, qh_a;
+    u32 len, len_a, stage, clip;
+} RcSh;
+typedef struct {
+    RcSh sh[5];      /* vs, tcs, tes, gs, fs */
+    u32 present, pad; /* a bit per stage with a shader */
+    PipeKey k;        /* its module handles zeroed */
+} Recipe;
+typedef struct {
+    u64 magic;
+    u32 keysize, count;
+} RcHead;
+static int g_rc_merged;
+static char* rc_path(void) {
+    static char p[1200];
+    if (!p[0]) snprintf(p, sizeof p, "%spipeline_recipes.bin", g_cachedir);
+    return p;
+}
+/* the recipes in the file (malloc'd, *n of them), NULL for none or another build's */
+static Recipe* rc_read(u32* n) {
+    RcHead h;
+    Recipe* r = NULL;
+    FILE* f = fopen(rc_path(), "rb");
+    *n = 0;
+    if (!f) return NULL;
+    if (fread(&h, sizeof h, 1, f) == 1 && h.magic == RC_MAGIC && h.keysize == sizeof(PipeKey) && h.count &&
+        h.count < 1000000 && (r = malloc((size_t)h.count * sizeof *r)) != NULL) {
+        *n = (u32)fread(r, sizeof *r, h.count, f);
+        if (!*n) {
+            free(r);
+            r = NULL;
+        }
+    }
+    fclose(f);
+    return r;
+}
+/* the shader a recipe's stage names, as vk_shader_get finds one: in the tables, else made from the shipped file */
+static VkSh* rc_shader(const RcSh* c) {
+    u32 mask[20] = {0};
+    mask[6] = c->clip;
+    for (VkSh* q = g_shh[c->hash & 1023]; q; q = q->next)
+        if (q->hash == c->hash && q->stage == (int)c->stage && !memcmp(q->mask, mask, sizeof mask) && q->clen == c->len &&
+            q->qh == c->qh && q->clen_a == c->len_a && q->qh_a == c->qh_a && !q->cbr.n && !q->failed)
+            return q;
+    VkSh* s = pf_ship_take(c->hash, (int)c->stage, mask, c->len, c->qh, c->len_a, c->qh_a);
+    if (s) {
+        s->shipped = 1; /* not found by a draw yet: pf_ship_take counted it as found */
+        __atomic_sub_fetch(&g_pf.ship_used, 1, __ATOMIC_RELAXED);
+        s->next = g_shh[c->hash & 1023];
+        g_shh[c->hash & 1023] = s;
+    }
+    return s;
+}
+/* on the GPU thread (vk_lock), at the first lookup after the shipped pass ended: the recipes' pipelines queued */
+static void rc_merge(void) {
+    u32 n, queued = 0, known = 0, lacked = 0;
+    Recipe* r;
+    u64 t0;
+    if (g_rc_merged || !g_pf.on || !__atomic_load_n(&g_pf.ship_ready, __ATOMIC_ACQUIRE)) return;
+    g_rc_merged = 1;
+    if (!(r = rc_read(&n))) return;
+    t0 = plat_ns();
+    for (u32 i = 0; i < n; i++) {
+        PipeKey k = r[i].k;
+        VkShaderModule* mod[5] = {&k.vs, &k.tcs, &k.tes, &k.gs, &k.fs};
+        int ok = (r[i].present & 1) != 0, found;
+        for (int s = 0; s < 5 && ok; s++) {
+            *mod[s] = VK_NULL_HANDLE;
+            if (!(r[i].present >> s & 1)) continue;
+            VkSh* sh = rc_shader(&r[i].sh[s]);
+            if (!sh || !sh->mod) ok = 0;
+            else *mod[s] = sh->mod;
+        }
+        if (!ok || k.nattr > 32 || k.nbind > 33 || k.ncolor > 8) {
+            lacked++;
+            continue;
+        }
+        Pipe* p = pipe_entry_in(&k, &found);
+        if (!p) break;
+        if (found) {
+            known++;
+            continue;
+        }
+        g_pipes_new--; /* counted as a draw's by pipe_entry_in */
+        p->prewarm = 1;
+        pm_lock(&g_pj_lock);
+        if (pipe_workers()) {
+            pipe_queue(p, 2);
+            queued++;
+        } else
+            p->prewarm = 0; /* made when a draw asks for it, then */
+        pm_unlock(&g_pj_lock);
+    }
+    free(r);
+    g_pf.npipe += queued;
+    __atomic_add_fetch(&g_pf.pipes_total, queued, __ATOMIC_RELAXED);
+    LOG("vulkan: pipeline recipes: %u queued to be made, %u already there, %u without their shaders on this PC (%u in "
+        "%s, %llu ms)\n",
+        queued, known, lacked, n, rc_path(), (unsigned long long)((plat_ns() - t0) / 1000000));
+}
+/* at exit, SWR_VK_RECIPES_RECORD=1: this run's pipelines whose shaders the shipped pass would make (keys of zeros
+   but their clip word, no constant buffer reads) added to the file */
+static void rc_record(void) {
+    u32 n = 0, added = 0, cap;
+    Recipe* r = rc_read(&n);
+    vk_lock();
+    cap = n + (u32)g_pipes_new + 64;
+    Recipe* grown = realloc(r, (size_t)cap * sizeof *r);
+    if (!grown) {
+        vk_unlock();
+        free(r);
+        return;
+    }
+    r = grown;
+    for (int b = 0; b < PIPEH; b++)
+        for (Pipe* p = g_pipeh[b]; p; p = p->next) {
+            Recipe c;
+            VkShaderModule mod[5] = {p->k.vs, p->k.tcs, p->k.tes, p->k.gs, p->k.fs};
+            int ok = __atomic_load_n(&p->ready, __ATOMIC_ACQUIRE) && p->p && mod[0];
+            memset(&c, 0, sizeof c);
+            for (int s = 0; s < 5 && ok; s++) {
+                VkSh* f = NULL;
+                if (!mod[s]) continue;
+                for (int i = 0; i < 1024 && !f; i++)
+                    for (VkSh* q = g_shh[i]; q && !f; q = q->next)
+                        if (q->mod == mod[s]) f = q;
+                if (!f || f->failed || f->cbr.n || !ship_key_only_clip(f->mask)) {
+                    ok = 0;
+                    break;
+                }
+                c.sh[s] = (RcSh){f->hash, f->qh, f->qh_a, f->clen, f->clen_a, (u32)f->stage, f->mask[6]};
+                c.present |= 1u << s;
+            }
+            if (!ok) continue;
+            c.k = p->k;
+            c.k.vs = c.k.tcs = c.k.tes = c.k.gs = c.k.fs = VK_NULL_HANDLE;
+            int dup = 0;
+            for (u32 i = 0; i < n && !dup; i++) dup = !memcmp(&r[i], &c, sizeof c);
+            if (dup) continue;
+            if (n == cap) break;
+            r[n++] = c;
+            added++;
+        }
+    vk_unlock();
+    if (added) {
+        RcHead h = {RC_MAGIC, (u32)sizeof(PipeKey), n};
+        char tmp[1300];
+        snprintf(tmp, sizeof tmp, "%s.tmp", rc_path());
+        FILE* f = fopen(tmp, "wb");
+        if (f) {
+            int ok = fwrite(&h, sizeof h, 1, f) == 1 && fwrite(r, sizeof *r, n, f) == n;
+            if (fclose(f)) ok = 0;
+            if (ok)
+                plat_replace_file(tmp, rc_path());
+            else
+                remove(tmp);
+        }
+    }
+    LOG("vulkan: pipeline recipes recorded: %u new, %u in %s\n", added, n, rc_path());
+    free(r);
 }
 
 /* What the pass hands each program to (a ShipSink's, on the reading thread). No constant buffer is read: a program
