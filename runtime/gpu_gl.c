@@ -3078,8 +3078,13 @@ static void prebuild_shaders(void){
         GLuint a=glCreateShader(stage==ST_VS? GL_VERTEX_SHADER : GL_FRAGMENT_SHADER); const char* s1=src; glShaderSource(a,1,&s1,NULL); glCompileShader(a);
         GLuint p=glCreateProgram(); glAttachShader(p,a); p_glProgramParameteri(p,0x8258,GL_TRUE); p_glProgramParameteri(p,GL_PROGRAM_BINARY_RETRIEVABLE_HINT,GL_TRUE);
         glLinkProgram(p); glDeleteShader(a); GLint ok=0; glGetProgramiv(p,GL_LINK_STATUS,&ok);
-        if(ok){ binary_save(p,key,1); built++; } else failed++;
-        glDeleteProgram(p); compile_ns+=plat_ns()-c0; }
+        if(ok){ binary_save(p,key,1); built++;
+          /* kept ready for the game, as warm_load does with binaries from earlier runs (same stage rule): warm_load ran
+             before this, so a program built now would otherwise be loaded back from disk at its first draw (measured
+             10-20 ms each on a GTX 1080: 264 such loads in a first session) */
+          if(stage!=ST_VS || strstr(src,"gl_Position = vec4(0.0, 0.0, 0.0, 1.0)")){ warm_stage_put(key,p,glGetUniformLocation(p,stage==ST_VS?"swr_vp":"swr_at")); p=0; } }
+        else failed++;
+        if(p) glDeleteProgram(p); compile_ns+=plat_ns()-c0; }
       pack_add_sh(key,s); free(src); free(s);
       u64 now=plat_ns(); if(now-last_ui>250000000ull){ last_ui=now; char st[160];
         snprintf(st,sizeof st,"Building shaders: file %u of %u, %u shaders (%u new)",filesdone+1,todo,progs,built); backend_status(st); } }
