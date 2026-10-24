@@ -2107,6 +2107,8 @@ static GLuint buf_cached(GLenum target, u64 start, u64 len){
   u64 h=fast_hash(src,len,0); st_vb_hashed+=len;
   if(!e){ e=calloc(1,sizeof *e); e->start=start; e->len=len; e->csseen=g_csgen; glGenBuffers(1,&e->id); e->next=vbc[k]; vbc[k]=e; e->hash=h^1; }
   glBindBuffer(target,e->id);
+  /* 2026-10-23: orphaning rewritten buffers and uploading them as STREAM_DRAW measured no gain at a 240 cap (worse
+     seconds under 170): the per-draw driver stall in heavy rooms is not this upload */
   if(e->hash!=h){ e->hash=h; glBufferData(target,(GLsizeiptr)len,src,GL_STATIC_DRAW); st_vb_up+=len; e->stable=0; } else if(e->stable<100000) e->stable++;
   if(e->stable>=63 && len>=4096){ e->shash=sample_hash(start,len); e->schk=g_submit_epoch; }
   e->write_gen=g_gw_gen;

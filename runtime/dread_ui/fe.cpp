@@ -146,8 +146,9 @@ static Rec recommend() {
     // renderer: above 60 FPS on a discrete NVIDIA / AMD card native Vulkan is clearly smoother (2026-10-23, RTX 5070, 240 cap:
     // seconds under 200 FPS 2 vs 33-35 with OpenGL, whose driver-call thread is the limit in heavy rooms). At 60 both hold 60, and
     // OpenGL is the most tested; integrated graphics stay on OpenGL (native Vulkan untested there). It falls back to OpenGL by itself.
-    bool vk_vendor = !g_hw.integrated && (g_hw.gpu.find("NVIDIA") != std::string::npos || g_hw.gpu.find("AMD") != std::string::npos || g_hw.gpu.find("Radeon") != std::string::npos);
-    r.renderer = vk_vendor && r.fps != "1" ? "vulkan_native" : "opengl";
+    // 2026-10-23 owner: OpenGL stays the pick for now (native Vulkan is still experimental). When it becomes the default:
+    //   r.renderer = !g_hw.integrated && (NVIDIA or AMD/Radeon in g_hw.gpu) && r.fps != "1" ? "vulkan_native" : "opengl";
+    r.renderer = "opengl";
     r.summary = fmt("Resolution %s, %s, picture %s, anisotropic filtering %s\xC3\x97%s, %s, fullscreen.",
                     res_text(r.res, true, r.asp.c_str()).c_str(), r.fps == "1" ? "60 FPS" : (r.fps + " FPS").c_str(), r.asp.c_str(), r.af.c_str(),
                     r.sharp != "0" ? ", light sharpening" : "", r.renderer == "vulkan_native" ? "Native Vulkan (smoothest at high frame rates)" : "OpenGL");
