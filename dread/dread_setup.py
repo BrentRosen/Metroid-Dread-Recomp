@@ -126,6 +126,21 @@ def pick_exefs(base, update):
                % (what, VERSION, (bid or 'unknown')[:16] + '...'))
 
 
+EXEFS_FILES = {'main', 'main.npdm', 'rtld', 'sdk'} | {'subsdk%d' % i for i in range(10)}
+
+
+def copy_exefs(exefs, dst):
+    """only the ExeFS's own files: the folder can be shared with the RomFS and other dumps (a roms folder with
+    .xci / .nsp files of several GB), which must not be copied"""
+    n = 0
+    for name in os.listdir(exefs):
+        s = os.path.join(exefs, name)
+        if name.lower() in EXEFS_FILES and os.path.isfile(s):
+            shutil.copyfile(s, os.path.join(dst, name.lower()))
+            n += 1
+    log('ExeFS: %d files copied (%s)' % (n, ', '.join(sorted(f for f in os.listdir(dst)))))
+
+
 # ------------------------------------------------------------------ RomFS
 def load_manifest():
     rows = []
@@ -308,10 +323,7 @@ def main():
         if os.path.samefile(exefs, ex_dst):
             log('ExeFS: the installed copy is used (rebuild)')
         else:
-            for n in os.listdir(exefs):
-                s = os.path.join(exefs, n)
-                if os.path.isfile(s):
-                    shutil.copyfile(s, os.path.join(ex_dst, n))
+            copy_exefs(exefs, ex_dst)
         P(23, 'Translating the game code', 'loading')
 
         import switchrecomp, nxloader, codegen   # the SwitchRecomp translator, bundled next to this script
