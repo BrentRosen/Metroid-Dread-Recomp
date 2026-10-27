@@ -32,8 +32,24 @@ the verified patches are applied, and the game code is compiled, here with clang
 `OUT=/some/folder macos/build.sh game ...` puts the game somewhere other than `games/`.
 
 The game folder then holds the program, the game code and data, and copies of SDL2 and MoltenVK, so it runs without
-Homebrew. Start it with **`Play Metroid Dread.command`** (double-click it in Finder, or run it in Terminal). After
+Homebrew. Start it with **`Play Metroid Dread.command`** (double-click it in Finder, or run it in Terminal).
+
+The runtime build downloads checksum-verified OpenH264 2.4.1 source and builds its decoder; both OpenH264 and
+libvpx are linked statically, so playback needs no additional video libraries at launch. After
 rebuilding the runtime, `macos/build.sh install [FOLDER]` copies it into a game folder again.
+
+### Updating an older build with missing video decoders
+
+If the log says `this build has no H.264 decoder`, rebuild and install the runtime:
+
+```
+macos/build.sh
+macos/build.sh install "/path/to/your/game/folder"
+```
+
+For an app bundle, run `macos/build.sh app "/path/to/your/game/folder"` afterward and replace your old app with the
+newly generated one. Game code does not need recompiling. This adds the missing decoder; if backgrounds still fail,
+attach the full log so VP9 matching and renderer errors can be checked too.
 
 ### As a Mac app
 
@@ -79,7 +95,7 @@ first start with every option explained. `renderer` is ignored: it is always nat
 - MoltenVK reports a per-stage limit of 16 samplers while the renderer's layout declares 64 textures per stage. With
   Metal argument buffers (MoltenVK's default) the real limit is far higher, so this should be fine, but it is the
   first thing to check if shaders or pipelines fail: the log says "pipelines may fail" at start either way.
-- Not built for macOS: DLSS, HDR output, F7 video recording, H.264 video decoding (OpenH264), frame generation.
+- Not built for macOS: DLSS, HDR output, F7 video recording, frame generation.
 - Guest memory uses 4 KB pages inside the Mac's 16 KB pages (`runtime/plat.c`).
 
 ## How the port is put together

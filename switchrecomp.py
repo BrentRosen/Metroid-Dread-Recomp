@@ -318,9 +318,11 @@ def build_runtime(cc, out, target_win, backend, say, opt='2'):
             srcs += [res]
     # NVDEC/VIC video: link OpenH264 (BSD) statically if we have it for this target
     oh = os.path.join(RT, 'oh264', plat)
-    h264 = os.path.isfile(os.path.join(oh, 'libdecoder.a')) and backend in ('win32', 'x11', 'headless', 'sdl')
+    h264 = all(os.path.isfile(os.path.join(oh, lib)) for lib in ('libdecoder.a', 'libcommon.a')) and backend in ('win32', 'x11', 'headless', 'sdl')
     vp = os.path.join(RT, 'vp9', plat)   # libvpx (VP9 .webm videos); optional
     vp9 = os.path.isfile(os.path.join(vp, 'libvpx.a')) and backend in ('win32', 'x11', 'headless', 'sdl')
+    if mac and backend == 'sdl' and (not h264 or not vp9):
+        raise SystemExit('macOS requires both OpenH264 and libvpx for video playback: run macos/build.sh first.')
     srcs += [os.path.join(RT, 'host1x.c'), os.path.join(RT, 'snxvk_glue.c')]
     # Metroid Dread front end + in-game menu (Dear ImGui, runtime/dread_ui); prebuilt by work-profiler/build_imgui.py
     imgui = os.path.join(RT, 'imgui', 'libimgui.a')

@@ -36,14 +36,36 @@ mvk_path() {
   return 1
 }
 
+# Match the vendored 2.4.1 API headers. Build only the decoder and common code,
+# statically, so installed games need no OpenH264 dylib or Homebrew at launch.
+build_h264() (
+  [ -f runtime/oh264/mac/libdecoder.a ] && [ -f runtime/oh264/mac/libcommon.a ] && exit 0
+  need curl "curl is required to download OpenH264."
+  need make "Install the Xcode command line tools: xcode-select --install"
+  local T
+  T=$(mktemp -d)
+  trap 'rm -rf "$T"' EXIT
+  curl -fL --retry 3 https://codeload.github.com/cisco/openh264/tar.gz/refs/tags/v2.4.1 -o "$T/openh264.tar.gz"
+  echo "8ffbe944e74043d0d3fb53d4a2a14c94de71f58dbea6a06d0dc92369542958ea  $T/openh264.tar.gz" | shasum -a 256 -c -
+  tar -xzf "$T/openh264.tar.gz" -C "$T"
+  # USE_ASM=No also allows Intel builds without an extra NASM dependency.
+  MACOSX_DEPLOYMENT_TARGET=12.0 make -C "$T/openh264-2.4.1" -j "$(sysctl -n hw.ncpu)" \
+    CC=clang CXX=clang++ USE_ASM=No V=No libdecoder.a libcommon.a
+  mkdir -p runtime/oh264/mac
+  cp "$T/openh264-2.4.1/libdecoder.a" "$T/openh264-2.4.1/libcommon.a" runtime/oh264/mac/
+)
+
 runtime() {
   deps
+  # Both codecs are required: do not silently omit video decoders.
+  vpx="$(brew_prefix libvpx)/lib/libvpx.a"
+  [ -f "$vpx" ] || { echo "Missing: static libvpx. brew install libvpx" >&2; exit 1; }
+  mkdir -p runtime/vp9/mac
+  cp -f "$vpx" runtime/vp9/mac/libvpx.a
+  echo "== OpenH264 decoder -> runtime/oh264/mac/"
+  build_h264
   echo "== native Vulkan renderer (ScarletNX) -> runtime/snxvk/libsnxvk_mac.a"
   python3 work-profiler/build_snxvk2.py
-  # libvpx for the game's VP9 videos, linked statically (same ABI as runtime/vp9/include); without it no videos
-  vpx="$(brew_prefix libvpx)/lib/libvpx.a"
-  if [ -f "$vpx" ]; then mkdir -p runtime/vp9/mac && cp -f "$vpx" runtime/vp9/mac/libvpx.a
-  else echo "warning: libvpx not found (brew install libvpx): the game's videos will not play"; fi
   echo "== runtime -> bin/runtime_macos_sdl"
   python3 switchrecomp.py --build-runtime --cc clang
 }

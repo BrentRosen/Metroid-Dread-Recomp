@@ -155,7 +155,7 @@ Support the first time, and never overwrites them.
 
 - No Play screen (it is Direct3D 11) and no in-game menu (it needs the OpenGL renderer): settings are in
   `Metroid Dread.ini`.
-- No DLSS, HDR output, F7 recording, frame generation, mouse aim, OpenH264 (H.264 video) or Tab fast forward.
+- No DLSS, HDR output, F7 recording, frame generation, mouse aim or Tab fast forward.
 - Setup needs an extracted ExeFS and RomFS, as on other platforms. No extraction tool or keys are included.
 
 ## Effect on other platforms
