@@ -11,6 +11,7 @@ const SwrModule* g_mod;
 GuestFn* g_disp;
 GuestFn swr_interp_entry;
 char g_datadir[1024], g_exename[256], g_exedir[1024];
+char g_bindir[1024];   /* where the game code and its libraries are: g_exedir, except inside a macOS .app (app_dirs) */
 volatile int g_quit;
 int g_frames;
 int g_opt_video_async_retire=0,g_opt_video_avx2=0,g_opt_video_block_copy=0;
@@ -648,7 +649,7 @@ static int load_code(void){
 #elif defined(__ANDROID__)
   snprintf(p,sizeof p,"lib%s_code.so",g_exename);   /* lives in the apk's lib dir */
 #elif defined(__APPLE__)
-  snprintf(p,sizeof p,"%s%s_code.dylib",g_exedir,g_exename);
+  snprintf(p,sizeof p,"%s%s_code.dylib",g_bindir,g_exename);
 #else
   snprintf(p,sizeof p,"%s%s_code.so",g_exedir,g_exename);
 #endif
@@ -802,10 +803,38 @@ static void split_path(const char* argv0){
   const char* base= s? s+1 : p;
   strncpy(g_exename,base,255); char* dot=strrchr(g_exename,'.'); if(dot && (!strcmp(dot,".exe")||!strcmp(dot,".EXE"))) *dot=0;
   if(s){ s[1]=0; strncpy(g_exedir,p,1023); } else g_exedir[0]=0;
+  strncpy(g_bindir,g_exedir,1023);
 }
+
+#if defined(__APPLE__)
+#include <sys/stat.h>
+/* A macOS .app (macos/build.sh app): the program, game code and libraries are in Contents/MacOS, the game's exefs and
+   romfs in Contents/Resources/NAME_data, all read-only. What the game writes (settings, log, saves, caches,
+   screenshots) goes to ~/Library/Application Support/NAME, which becomes the game folder: g_exedir points there, its
+   NAME_data/exefs and romfs are links into the app (made again at every start, so the app can be moved), and it is the
+   working folder. Writing into the app would break its signature. Outside an .app nothing changes */
+static void app_dirs(void){
+  const char* m=strstr(g_exedir,".app/Contents/MacOS/"); const char* home=getenv("HOME");
+  if(!m || m[20] || !home || !*home) return;
+  char res[1200], user[1200], data[1300], link[1400], dst[1400], cur[1400];
+  snprintf(res,sizeof res,"%.*s.app/Contents/Resources/%s_data",(int)(m-g_exedir),g_exedir,g_exename);
+  snprintf(user,sizeof user,"%s/Library/Application Support/%s",home,g_exename);
+  mkdir(user,0755);
+  snprintf(data,sizeof data,"%s/%s_data",user,g_exename); mkdir(data,0755);
+  static const char* const L[]={"exefs","romfs"};
+  for(int i=0;i<2;i++){
+    snprintf(link,sizeof link,"%s/%s",data,L[i]); snprintf(dst,sizeof dst,"%s/%s",res,L[i]);
+    ssize_t n=readlink(link,cur,sizeof cur-1); if(n>=0) cur[n]=0;
+    if(n<0 || strcmp(cur,dst)){ unlink(link); symlink(dst,link); } }   /* a real folder there is left alone */
+  snprintf(g_exedir,sizeof g_exedir,"%s/",user);
+  if(chdir(user)) {} }
+#endif
 
 int swr_main(int argc, char** argv){
   split_path(argv[0]);
+#if defined(__APPLE__)
+  app_dirs();
+#endif
   char ini[1400];
   snprintf(ini,sizeof ini,"%s%s.ini",g_exedir,g_exename);
   pm_init(&g_setq_lock); g_setq_init=1;

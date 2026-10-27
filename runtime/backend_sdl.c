@@ -123,8 +123,9 @@ static const char* HELP=
    loader, then Homebrew's, then SDL's own search. MoltenVK on its own is enough: it is a whole Vulkan implementation */
 static int vk_library(void){
   char p[1300]; const char* tried[8]; int n=0;
-  snprintf(p,sizeof p,"%slibMoltenVK.dylib",g_exedir); tried[n++]=p;
-  static char p2[1300]; snprintf(p2,sizeof p2,"%slibvulkan.1.dylib",g_exedir); tried[n++]=p2;
+  extern char g_bindir[];   /* the game folder, or the .app's Contents/MacOS (main.c app_dirs) */
+  snprintf(p,sizeof p,"%slibMoltenVK.dylib",g_bindir); tried[n++]=p;
+  static char p2[1300]; snprintf(p2,sizeof p2,"%slibvulkan.1.dylib",g_bindir); tried[n++]=p2;
   tried[n++]="/opt/homebrew/lib/libvulkan.1.dylib"; tried[n++]="/usr/local/lib/libvulkan.1.dylib";
   tried[n++]="/opt/homebrew/lib/libMoltenVK.dylib"; tried[n++]="/usr/local/lib/libMoltenVK.dylib";
   const char* env=getenv("SWR_VULKAN_LIBRARY");

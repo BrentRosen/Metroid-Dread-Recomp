@@ -35,6 +35,21 @@ The game folder then holds the program, the game code and data, and copies of SD
 Homebrew. Start it with **`Play Metroid Dread.command`** (double-click it in Finder, or run it in Terminal). After
 rebuilding the runtime, `macos/build.sh install [FOLDER]` copies it into a game folder again.
 
+### As a Mac app
+
+```
+macos/build.sh app                              # games/Metroid Dread.app from the set-up games/ folder
+```
+
+`Metroid Dread.app` holds everything: the program, the game code, SDL2, MoltenVK and the game data. Put it anywhere
+(Applications, for example) and double-click it. On the same disk the game data inside it is an APFS clone of the game
+folder's, so it takes almost no extra space. What the game writes (settings, saves, the log, shader caches,
+screenshots) goes to `~/Library/Application Support/Metroid Dread`. On the first build, the game folder's settings,
+saves and shader cache are copied there; later builds never overwrite them. Run `macos/build.sh app` again after a
+rebuild.
+
+**The app contains your copy of the game: keep it to yourself.**
+
 ## Controls
 
 A controller works as on the Switch (buttons by position). On the keyboard:

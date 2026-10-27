@@ -34,7 +34,7 @@ boots and plays at about 60 FPS, with the VP9 videos and sound. Intel Macs are u
 | `runtime/posix_compat.h` | **new.** force-included into the generated game code |
 | `switchrecomp.py` | `--target macos`, `--backend sdl` (the defaults on a Mac), `_code.dylib`, clang and SDL2 flags |
 | `dread/dread_setup.py` | clang instead of the bundled GCC, `.dylib` output |
-| `macos/build.sh` | **new.** builds the runtime, runs setup, installs a self-contained game folder |
+| `macos/build.sh` | **new.** builds the runtime, runs setup, installs a self-contained game folder or makes `Metroid Dread.app` |
 | `third_party/khronos/` | **new.** the OpenGL headers macOS lacks |
 
 ### Window backend (`backend_sdl.c`)
@@ -114,6 +114,29 @@ The game folder gets copies of SDL2 and MoltenVK so it runs without Homebrew:
 - The install names are rewritten to `@executable_path` / `@loader_path`.
 - `install_name_tool` invalidates the code signatures, and Apple silicon runs nothing unsigned, so every binary is
   signed again ad hoc (`codesign -s -`).
+
+### The app (`macos/build.sh app`)
+
+`Metroid Dread.app` is the same runtime in a bundle:
+
+- `Contents/MacOS` has the program, the game code and the libraries.
+- `Contents/Resources` has the icon (`runtime/app.ico` converted with `sips` and `iconutil`) and the game's `exefs`
+  and `romfs`. They are copied with `cp -c`, an APFS clone, so on the same disk they take no extra space.
+- The `Info.plist` names it a game (`public.app-category.action-games`, so macOS can use Game Mode) and asks for
+  macOS 12.
+- The whole bundle is signed ad hoc.
+
+The runtime must never write into the bundle: that would break the signature's seal, and the app may sit in a
+read-only place. `main.c` (`app_dirs`) notices it runs from `.app/Contents/MacOS/` and switches folders:
+
+- `~/Library/Application Support/Metroid Dread` becomes the game folder: settings, log, hints, saves and the Vulkan
+  caches go there, and it is the working folder (screenshots).
+- Its `Metroid Dread_data/exefs` and `romfs` are symbolic links into the bundle's `Resources`, made again at every
+  start, so the app can be moved.
+- The game code and MoltenVK are still loaded from `Contents/MacOS` (`g_bindir`).
+
+Outside an `.app` nothing changes. The build copies the game folder's settings, saves and shader cache to Application
+Support the first time, and never overwrites them.
 
 ## Pitfalls hit along the way
 
