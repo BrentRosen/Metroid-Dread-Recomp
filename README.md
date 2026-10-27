@@ -83,7 +83,7 @@ DLLs the game ships beside it. They are not in this repository.
 
 ## Build and play on macOS
 
-Early and not yet tested in game. With the Xcode command line tools and `brew install sdl2 molten-vk glslang libvpx`:
+Early: tested on one Mac so far. With the Xcode command line tools and `brew install sdl2 molten-vk glslang libvpx`:
 
 ```
 macos/build.sh                              # the runtime

@@ -1,8 +1,8 @@
 # Metroid Dread on macOS
 
-> **Early, untested in game.** The macOS build compiles, starts, opens its window and runs recompiled Switch code
-> on Apple silicon (tested on an M5, macOS 26.5), but nobody has played Metroid Dread with it yet. Expect problems,
-> and please attach `Metroid Dread.log` from the game folder to any report.
+> **Early.** Tested on one Mac so far (an M5 with macOS 26.5), where the game sets up, boots and plays. Expect
+> problems on other Macs, and please attach `Metroid Dread.log` from the game folder to any report. How the port
+> works: [PORTING.md](PORTING.md).
 
 macOS stops at OpenGL 4.1 and the OpenGL renderer needs 4.3, so the Mac build always draws with the **native Vulkan
 renderer** (ScarletNX), running on Metal through [MoltenVK](https://github.com/KhronosGroup/MoltenVK). The window,
@@ -68,6 +68,8 @@ first start with every option explained. `renderer` is ignored: it is always nat
 - Guest memory uses 4 KB pages inside the Mac's 16 KB pages (`runtime/plat.c`).
 
 ## How the port is put together
+
+The details, and why each change was needed: [PORTING.md](PORTING.md).
 
 | file | what |
 |---|---|
